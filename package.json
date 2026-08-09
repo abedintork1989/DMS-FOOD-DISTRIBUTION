@@ -2,6 +2,9 @@
   "name": "dms-food-distribution",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,7 +17,8 @@
     "next": "^15.5.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-multi-date-picker": "^4.5.2"
+    "react-multi-date-picker": "^4.5.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -1,71 +1,1660 @@
 "use client";
 
+
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Check, Eye, Plus, X } from "lucide-react";
+import {
+  Check,
+  Eye,
+  Plus,
+  Search,
+  X,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
-import type { Customer, Order, OrderStatus, Product } from "@/lib/types";
-import { getCustomers, getOrders, getProducts, saveOrders } from "@/lib/storage";
-import { money } from "@/lib/format";
+import { supabase } from "@/lib/supabase";
 
-function statusLabel(status: OrderStatus) {
-  const map = { pending: ["در انتظار تایید","warning"], approved:["تایید شده","success"], delivered:["تحویل شده","info"], cancelled:["لغو شده","danger"] } as const;
-  return map[status];
+type Customer = {
+  id: string;
+  name: string;
+  visitor?: string | null;
+};
+
+type Product = {
+  id: string;
+  name: string;
+  category: string | null;
+  barcode: string | null;
+  unit: string | null;
+  quantity_per_carton: number | null;
+  consumer_price: number | null;
+  inventory: number | null;
+};
+
+type CustomerDiscount = {
+  category: string;
+  discount_percent: number;
+};
+
+type OrderItem = {
+  id?: string;
+  product_id?: string;
+  quantity?: number;
+  productId?: string;
+  productName?: string;
+  barcode?: string;
+  category?: string;
+  cartonSize?: number;
+  totalUnits?: number;
+  order_cartons?: number;
+order_units?: number;
+consumer_price?: number;
+discount_percent?: number;
+final_purchase_price?: number;
+ 
+  
+
+  total?: number;
+
+  products?: {
+    name: string;
+    barcode: string | null;
+    category: string | null;
+    quantity_per_carton: number | null;
+  };
+};
+
+type Order = {
+  id: string;
+  customer_id: string;
+  customer_name?: string;
+  visitor?: string | null;
+  status: string;
+  invoice_total?: number;
+  created_at: string;
+
+  customers?: {
+    name: string;
+    visitor: string | null;
+  };
+
+  order_items?: OrderItem[];
+};
+
+const emptyQuantities: Record<
+  string,
+  {
+    cartons: string;
+    units: string;
+  }
+> = {};
+
+/* ------------------------------------------------ */
+/* ابزارهای عدد فارسی */
+/* ------------------------------------------------ */
+
+function toEnglishDigits(value: string) {
+  return value
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 }
 
+function toPersianDigits(value: string | number) {
+  return String(value)
+    .replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+}
+
+function digitsOnly(value: string) {
+  return toEnglishDigits(value).replace(/[^\d]/g, "");
+}
+
+function formatNumber(value: number | string | null | undefined) {
+  const digits = digitsOnly(String(value ?? ""));
+
+  if (!digits) {
+    return "۰";
+  }
+
+  return toPersianDigits(
+    digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  );
+}
+
+function money(value: number | string | null | undefined) {
+  return `${formatNumber(value)} ریال`;
+}
+
+function formatDate(value: string) {
+  if (!value) return "-";
+
+  return new Intl.DateTimeFormat("fa-IR", {
+    dateStyle: "medium",
+  }).format(new Date(value));
+}
+
+/* ------------------------------------------------ */
+/* وضعیت سفارش */
+/* ------------------------------------------------ */
+
+function statusInfo(status: string) {
+  switch (status) {
+    case "pending":
+      return {
+        label: "در انتظار تایید",
+        className: "warning",
+      };
+
+    case "approved":
+      return {
+        label: "تایید شده",
+        className: "success",
+      };
+
+    case "delivered":
+      return {
+        label: "تحویل شده",
+        className: "info",
+      };
+
+    case "cancelled":
+      return {
+        label: "باطل شده",
+        className: "danger",
+      };
+
+    default:
+      return {
+        label: status,
+        className: "warning",
+      };
+  }
+}
+
+/* ------------------------------------------------ */
+/* صفحه */
+/* ------------------------------------------------ */
+
 export default function OrdersPage() {
-  const [orders,setOrders]=useState<Order[]>([]);
-  const [customers,setCustomers]=useState<Customer[]>([]);
-  const [products,setProducts]=useState<Product[]>([]);
-  const [modal,setModal]=useState(false);
-  const [detail,setDetail]=useState<Order|null>(null);
-  const [customerId,setCustomerId]=useState("");
-  const [visitor,setVisitor]=useState("رضا");
-  const [quantities,setQuantities]=useState<Record<string,number>>({});
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [discounts, setDiscounts] = useState<CustomerDiscount[]>([]);
 
-  useEffect(()=>{setOrders(getOrders());setCustomers(getCustomers());setProducts(getProducts())},[]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const total = useMemo(()=>products.reduce((sum,p)=>sum+(quantities[p.id]||0)*p.sellPrice,0),[products,quantities]);
+  const [modal, setModal] = useState(false);
+  const [detail, setDetail] = useState<Order | null>(null);
 
-  function createOrder(){
-    const customer=customers.find(c=>c.id===customerId);
-    if(!customer){alert("لطفاً مشتری را انتخاب کنید.");return}
-    const items=products.filter(p=>(quantities[p.id]||0)>0).map(p=>({productId:p.id,productName:p.name,quantity:quantities[p.id],price:p.sellPrice}));
-    if(!items.length){alert("حداقل یک کالا با تعداد بیشتر از صفر وارد کنید.");return}
-    const cost=items.reduce((s,i)=>s+i.quantity*(products.find(p=>p.id===i.productId)?.buyPrice||0),0);
-    const order:Order={id:`O${Date.now()}`,customerId,customerName:customer.name,visitor,createdAt:new Date().toISOString(),status:"pending",items,total,cost,extraCost:0,profit:total-cost};
-    const next=[order,...orders];setOrders(next);saveOrders(next);setModal(false);setQuantities({});
+  const [customerId, setCustomerId] = useState("");
+  const [visitor, setVisitor] = useState("");
+
+  const [search, setSearch] = useState("");
+
+  const [quantities, setQuantities] =
+    useState<Record<string, { cartons: string; units: string }>>(
+      emptyQuantities
+    );
+
+const router = useRouter();
+
+  /* ------------------------------------------------ */
+  /* دریافت اطلاعات اولیه */
+  /* ------------------------------------------------ */
+
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  async function loadInitialData() {
+    setLoading(true);
+
+    await Promise.all([
+      loadCustomers(),
+      loadProducts(),
+      loadOrders(),
+    ]);
+
+    setLoading(false);
   }
 
-  function setStatus(id:string,status:OrderStatus){
-    const next=orders.map(o=>o.id===id?{...o,status}:o);setOrders(next);saveOrders(next);
-    if(detail?.id===id)setDetail({...detail,status});
+  async function loadCustomers() {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("id,name,visitor")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      alert(`خطا در دریافت مشتریان: ${error.message}`);
+      return;
+    }
+
+    setCustomers((data || []) as Customer[]);
   }
 
-  return <AppShell>
-    <PageHeader title="سفارشات" subtitle="کارتابل سفارش‌ها و ثبت سفارش جدید" action={<button className="btn btn-primary" onClick={()=>setModal(true)}><Plus size={16}/> ثبت سفارش</button>}/>
-    <div className="panel table-wrap">
-      <table><thead><tr><th>شماره</th><th>مشتری</th><th>ویزیتور</th><th>مبلغ</th><th>سود تقریبی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>{orders.map(o=>{const [label,cls]=statusLabel(o.status);return <tr key={o.id}><td>{o.id}</td><td>{o.customerName}</td><td>{o.visitor}</td><td>{money(o.total)}</td><td>{money(o.profit-o.extraCost)}</td><td><span className={`badge ${cls}`}>{label}</span></td><td><button className="btn btn-secondary btn-small" onClick={()=>setDetail(o)}><Eye size={14}/> مشاهده</button></td></tr>})}</tbody></table>
-    </div>
+  async function loadProducts() {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        `
+        id,
+        name,
+        category,
+        barcode,
+        unit,
+        quantity_per_carton,
+        consumer_price,
+        inventory
+        `
+      )
+      .order("name", { ascending: true });
 
-    {modal&&<div className="modal-backdrop"><div className="modal">
-      <div className="modal-header"><h2>ثبت سفارش</h2><button className="close-btn" onClick={()=>setModal(false)}>×</button></div>
-      <div className="form-grid">
-        <div className="form-field"><label>مشتری</label><select className="select" value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">انتخاب مشتری</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-        <div className="form-field"><label>ویزیتور</label><input className="input" value={visitor} onChange={e=>setVisitor(e.target.value)}/></div>
+    if (error) {
+      console.error(error);
+      alert(`خطا در دریافت کالاها: ${error.message}`);
+      return;
+    }
+
+    setProducts((data || []) as Product[]);
+  }
+
+  async function loadOrders() {
+    const { data, error } = await supabase
+.from("orders")
+.select(`
+  *,
+  customers(
+    name,
+    visitor
+  ),
+  order_items(
+    *,
+    products(
+      name,
+      barcode,
+      category,
+      quantity_per_carton
+    )
+  )
+`)
+      .order("created_at", {
+        ascending: false,
+      });
+
+    if (error) {
+      console.error(error);
+      alert(`خطا در دریافت سفارشات: ${error.message}`);
+      return;
+    }
+
+   console.log("FULL DATA:", data);
+
+setOrders((data || []) as Order[]);
+  }
+
+  /* ------------------------------------------------ */
+  /* دریافت تخفیف مشتری */
+  /* ------------------------------------------------ */
+
+  async function loadCustomerDiscounts(id: string) {
+    if (!id) {
+      setDiscounts([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("customer_group_discounts")
+      .select("category,discount_percent")
+      .eq("customer_id", id);
+
+    if (error) {
+      console.error(error);
+      alert(`خطا در دریافت تخفیف‌های مشتری: ${error.message}`);
+      setDiscounts([]);
+      return;
+    }
+
+    setDiscounts((data || []) as CustomerDiscount[]);
+  }
+
+  function getDiscountForCategory(category: string | null) {
+    if (!category) return 0;
+
+    const item = discounts.find(
+      (discount) =>
+        discount.category.trim() === category.trim()
+    );
+
+    return Number(item?.discount_percent || 0);
+  }
+
+  /* ------------------------------------------------ */
+  /* انتخاب مشتری */
+/* ------------------------------------------------ */
+
+  async function handleCustomerChange(id: string) {
+    setCustomerId(id);
+
+    const customer = customers.find(
+      (item) => item.id === id
+    );
+
+    setVisitor(customer?.visitor || "");
+
+    await loadCustomerDiscounts(id);
+  }
+
+  /* ------------------------------------------------ */
+  /* قیمت نهایی */
+/* ------------------------------------------------ */
+
+  function getFinalPrice(product: Product) {
+    const consumerPrice = Number(
+      product.consumer_price || 0
+    );
+
+    const discountPercent = getDiscountForCategory(
+      product.category
+    );
+
+    return Math.round(
+      consumerPrice -
+        (consumerPrice * discountPercent) / 100
+    );
+  }
+
+  /* ------------------------------------------------ */
+  /* تعداد کالا */
+/* ------------------------------------------------ */
+
+  function getQuantity(productId: string) {
+    return (
+      quantities[productId] || {
+        cartons: "",
+        units: "",
+      }
+    );
+  }
+
+  function updateQuantity(
+    productId: string,
+    field: "cartons" | "units",
+    value: string
+  ) {
+    const clean = digitsOnly(value);
+
+    setQuantities((previous) => ({
+      ...previous,
+      [productId]: {
+        ...(previous[productId] || {
+          cartons: "",
+          units: "",
+        }),
+        [field]: clean,
+      },
+    }));
+  }
+
+  /* ------------------------------------------------ */
+  /* محاسبه آیتم‌ها */
+/* ------------------------------------------------ */
+
+  const orderItems = useMemo(() => {
+    const result: OrderItem[] = [];
+
+    for (const product of products) {
+      const quantity = getQuantity(product.id);
+
+      const cartons = Number(quantity.cartons || 0);
+      const units = Number(quantity.units || 0);
+
+      if (cartons === 0 && units === 0) {
+        continue;
+      }
+
+      const cartonSize = Math.max(
+        Number(product.quantity_per_carton || 1),
+        1
+      );
+
+      const totalUnits =
+        cartons * cartonSize + units;
+
+      const consumerPrice = Number(
+        product.consumer_price || 0
+      );
+
+      const discountPercent =
+        getDiscountForCategory(product.category);
+
+      const finalPurchasePrice =
+        Math.round(
+          consumerPrice -
+            (consumerPrice * discountPercent) / 100
+        );
+
+      const total =
+        totalUnits * finalPurchasePrice;
+
+      result.push({
+  productId: product.id,
+  productName: product.name,
+  barcode: product.barcode || "-",
+  category: product.category || "-",
+  cartonSize,
+  order_cartons: cartons,
+  order_units: units,
+  totalUnits,
+  consumer_price: consumerPrice,
+  discount_percent: discountPercent,
+  final_purchase_price: finalPurchasePrice,
+  total,
+});
+    }
+
+    return result;
+  }, [products, quantities, discounts]);
+
+  const orderTotal = useMemo(() => {
+    return orderItems.reduce(
+      (sum, item) => sum + (item.total || 0),
+      0
+    );
+  }, [orderItems]);
+
+  /* ------------------------------------------------ */
+  /* فیلتر کالا */
+/* ------------------------------------------------ */
+
+  const filteredProducts = products.filter((product) => {
+    const q = search.trim().toLowerCase();
+
+    if (!q) return true;
+
+    return [
+      product.name,
+      product.category,
+      product.barcode,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+
+  /* ------------------------------------------------ */
+  /* باز کردن ثبت سفارش */
+/* ------------------------------------------------ */
+
+  function openOrderModal() {
+    setCustomerId("");
+    setVisitor("");
+    setDiscounts([]);
+    setSearch("");
+    setQuantities({});
+    setModal(true);
+  }
+
+  function closeOrderModal() {
+    if (saving) return;
+
+    setModal(false);
+    setCustomerId("");
+    setVisitor("");
+    setDiscounts([]);
+    setSearch("");
+    setQuantities({});
+  }
+
+  /* ------------------------------------------------ */
+  /* ثبت سفارش */
+/* ------------------------------------------------ */
+
+  async function createOrder() {
+    if (!customerId) {
+      alert("لطفاً مشتری را انتخاب کنید.");
+      return;
+    }
+
+    if (!orderItems.length) {
+      alert("حداقل یک کالا برای سفارش انتخاب کنید.");
+      return;
+    }
+
+    const customer = customers.find(
+      (item) => item.id === customerId
+    );
+
+    if (!customer) {
+      alert("مشتری انتخاب‌شده پیدا نشد.");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      /* ابتدا سفارش اصلی */
+
+      const { data: order, error: orderError } =
+        await supabase
+          .from("orders")
+          .insert({
+            customer_id: customerId,
+            customer_name: customer.name,
+            visitor: visitor || customer.visitor || null,
+            status: "pending",
+            total: orderTotal,
+          })
+          .select("*")
+          .single();
+
+      if (orderError) {
+        console.error(orderError);
+        alert(
+          `خطا در ثبت سفارش: ${orderError.message}`
+        );
+        return;
+      }
+
+      /* سپس آیتم‌های سفارش */
+
+      const itemsPayload = orderItems.map((item) => ({
+        order_id: order.id,
+
+        product_id: item.productId,
+
+        product_name: item.productName,
+
+        barcode: item.barcode,
+
+        category: item.category,
+
+        carton_size: item.cartonSize,
+
+        order_cartons: item.order_cartons,
+
+        order_units: item.order_units,
+
+        total_units: item.totalUnits,
+
+        consumer_price:item.consumer_price,
+
+        discount_percent: item.discount_percent,
+
+        final_purchase_price:
+          item.final_purchase_price,
+
+        total: item.total,
+      }));
+
+      const { error: itemsError } =
+        await supabase
+          .from("order_items")
+          .insert(itemsPayload);
+
+      if (itemsError) {
+        console.error(itemsError);
+
+        /*
+         * اگر آیتم‌ها ثبت نشدند،
+         * سفارش اصلی را هم حذف می‌کنیم.
+         */
+
+        await supabase
+          .from("orders")
+          .delete()
+          .eq("id", order.id);
+
+        alert(
+          `خطا در ثبت کالاهای سفارش: ${itemsError.message}`
+        );
+
+        return;
+      }
+
+      alert("سفارش با موفقیت ثبت شد.");
+
+      closeOrderModal();
+
+      await loadOrders();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* ------------------------------------------------ */
+  /* تغییر وضعیت سفارش */
+/* ------------------------------------------------ */
+
+  async function changeStatus(
+    orderId: string,
+    status: string
+  ) {
+    const message =
+      status === "approved"
+        ? "سفارش تایید شود؟"
+        : status === "cancelled"
+        ? "سفارش باطل شود؟"
+        : status === "delivered"
+        ? "تحویل کامل سفارش تایید شود؟"
+        : "";
+
+    if (message && !confirm(message)) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        status,
+      })
+      .eq("id", orderId);
+
+    if (error) {
+      console.error(error);
+      alert(
+        `خطا در تغییر وضعیت سفارش: ${error.message}`
+      );
+      return;
+    }
+
+    await loadOrders();
+
+    if (detail?.id === orderId) {
+      setDetail({
+        ...detail,
+        status,
+      });
+    }
+  }
+
+  /* ------------------------------------------------ */
+  /* حذف سفارش */
+/* ------------------------------------------------ */
+
+  async function deleteOrder(id: string) {
+    if (
+      !confirm(
+        "آیا از حذف کامل این سفارش مطمئن هستید؟"
+      )
+    ) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      alert(
+        `خطا در حذف سفارش: ${error.message}`
+      );
+      return;
+    }
+
+    setDetail(null);
+
+    await loadOrders();
+  }
+
+  /* ------------------------------------------------ */
+  /* Render */
+/* ------------------------------------------------ */
+
+  return (
+    <AppShell>
+      <PageHeader
+        title="سفارشات"
+        subtitle="ثبت، بررسی و مدیریت سفارش مشتریان"
+        action={
+
+          <button
+  className="btn btn-primary"
+  onClick={()=>router.push("/orders/new")}
+>
+  <Plus size={17} />
+  ثبت سفارش جدید
+</button>
+        }
+      />
+
+      {/* لیست سفارشات */}
+
+      <div className="panel">
+        <div className="table-wrap">
+          {loading ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: "center",
+              }}
+            >
+              در حال دریافت سفارشات...
+            </div>
+          ) : orders.length === 0 ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: "center",
+                color: "#64748b",
+              }}
+            >
+              هنوز سفارشی ثبت نشده است.
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                
+                  <th>مشتری</th>
+                  <th>ویزیتور</th>
+                  <th>تاریخ</th>
+                  <th>مبلغ کل</th>
+                  <th>وضعیت</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {orders.map((order) => {
+                  const status =
+                    statusInfo(order.status);
+
+                  return (
+                    <tr key={order.id}>
+                      
+
+                      <td>
+                       {order.customers?.name || "-"}
+                      </td>
+
+                      <td>
+                        {order.customers?.visitor || "-"}
+                      </td>
+
+                      <td>
+                        {formatDate(
+                          order.created_at
+                        )}
+                      </td>
+
+                      <td>
+                        <strong>
+                          {money(order.invoice_total || 0)}
+                        </strong>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`badge ${status.className}`}
+                        >
+                          {status.label}
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+  className="btn btn-secondary btn-small"
+  onClick={async () => {
+
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        *,
+        customers(
+          name,
+          visitor
+        ),
+        order_items(
+          *,
+          products(
+            name,
+            barcode,
+            category,
+            quantity_per_carton
+          )
+        )
+      `)
+      .eq("id", order.id)
+      .single();
+
+
+    if (error) {
+      console.log(error);
+      alert(error.message);
+      return;
+    }
+
+router.push(`/orders/${order.id}`);
+
+  }}
+>
+  <Eye size={15} />
+  مشاهده
+</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
-      <div style={{marginTop:20}}><h3 style={{fontSize:15}}>کالاها</h3><div style={{display:"grid",gap:8}}>{products.map(p=><div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 120px 150px",gap:10,alignItems:"center",padding:"9px 0",borderBottom:"1px solid #e2e8f0"}}><span>{p.name}</span><span style={{color:"#64748b",fontSize:12}}>{money(p.sellPrice)}</span><input className="input" type="number" min="0" placeholder="تعداد" value={quantities[p.id]||""} onChange={e=>setQuantities({...quantities,[p.id]:Number(e.target.value)})}/></div>)}</div></div>
-      <div style={{marginTop:18,fontWeight:800}}>جمع سفارش: {money(total)}</div>
-      <div className="action-row" style={{marginTop:18}}><button className="btn btn-primary" onClick={createOrder}>ارسال سفارش</button><button className="btn btn-secondary" onClick={()=>setModal(false)}>انصراف</button></div>
-    </div></div>}
 
-    {detail&&<div className="modal-backdrop"><div className="modal">
-      <div className="modal-header"><h2>جزئیات {detail.id}</h2><button className="close-btn" onClick={()=>setDetail(null)}>×</button></div>
-      <p><b>مشتری:</b> {detail.customerName}</p><p><b>ویزیتور:</b> {detail.visitor}</p>
-      <div className="table-wrap"><table><thead><tr><th>کالا</th><th>تعداد</th><th>قیمت</th><th>جمع</th></tr></thead><tbody>{detail.items.map(i=><tr key={i.productId}><td>{i.productName}</td><td>{i.quantity}</td><td>{money(i.price)}</td><td>{money(i.price*i.quantity)}</td></tr>)}</tbody></table></div>
-      <h3>جمع: {money(detail.total)}</h3>
-      <div className="action-row">{detail.status==="pending"&&<button className="btn btn-success" onClick={()=>setStatus(detail.id,"approved")}><Check size={15}/> تایید سفارش</button>}{detail.status==="approved"&&<button className="btn btn-primary" onClick={()=>setStatus(detail.id,"delivered")}>تحویل شد</button>}{detail.status!=="delivered"&&detail.status!=="cancelled"&&<button className="btn btn-danger" onClick={()=>setStatus(detail.id,"cancelled")}><X size={15}/> لغو سفارش</button>}</div>
-    </div></div>}
-  </AppShell>
+      {/* ------------------------------------------------ */}
+      {/* مودال ثبت سفارش */}
+      {/* ------------------------------------------------ */}
+
+      {modal && (
+        <div className="modal-backdrop">
+          <div
+            className="modal"
+            style={{
+              maxWidth: 1250,
+              width: "95%",
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2
+                  style={{
+                    margin: 0,
+                  }}
+                >
+                  ثبت سفارش جدید
+                </h2>
+
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: "#64748b",
+                    fontSize: 13,
+                  }}
+                >
+                  قیمت نهایی بر اساس تخفیف گروه کالایی
+                  مشتری محاسبه می‌شود.
+                </div>
+              </div>
+
+              <button
+                className="close-btn"
+                onClick={closeOrderModal}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* اطلاعات سفارش */}
+
+            <div
+              className="form-grid"
+              style={{
+                marginBottom: 20,
+              }}
+            >
+              <div className="form-field">
+                <label>مشتری</label>
+
+                <select
+                  className="input"
+                  value={customerId}
+                  onChange={(e) =>
+                    handleCustomerChange(
+                      e.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    انتخاب مشتری
+                  </option>
+
+                  {customers.map((customer) => (
+                    <option
+                      key={customer.id}
+                      value={customer.id}
+                    >
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label>ویزیتور</label>
+
+                <input
+                  className="input"
+                  value={visitor}
+                  onChange={(e) =>
+                    setVisitor(e.target.value)
+                  }
+                  placeholder="نام ویزیتور"
+                />
+              </div>
+            </div>
+
+            {/* تخفیف‌های مشتری */}
+
+            {customerId && (
+              <div
+                style={{
+                  padding: 15,
+                  borderRadius: 12,
+                  background: "#f8fafc",
+                  border:
+                    "1px solid #e2e8f0",
+                  marginBottom: 20,
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 800,
+                    marginBottom: 10,
+                  }}
+                >
+                  تخفیف‌های مشتری
+                </div>
+
+                {discounts.length === 0 ? (
+                  <div
+                    style={{
+                      color: "#64748b",
+                      fontSize: 13,
+                    }}
+                  >
+                    برای این مشتری تخفیف گروهی
+                    ثبت نشده است؛ بنابراین همه
+                    کالاها با تخفیف ۰٪ محاسبه
+                    می‌شوند.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                    }}
+                  >
+                    {discounts.map(
+                      (discount) => (
+                        <span
+                          key={discount.category}
+                          style={{
+                            padding:
+                              "6px 10px",
+                            borderRadius: 8,
+                            background:
+                              "#ffffff",
+                            border:
+                              "1px solid #e2e8f0",
+                            fontSize: 13,
+                          }}
+                        >
+                          {discount.category}:
+                          {" "}
+                          <strong>
+                            {toPersianDigits(
+                              discount.discount_percent
+                            )}
+                            ٪
+                          </strong>
+                        </span>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* جستجوی کالا */}
+
+            <div
+              style={{
+                marginBottom: 15,
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                }}
+              >
+                <Search
+                  size={17}
+                  style={{
+                    position: "absolute",
+                    right: 12,
+                    top: 13,
+                    color: "#94a3b8",
+                  }}
+                />
+
+                <input
+                  className="input"
+                  style={{
+                    paddingRight: 40,
+                  }}
+                  value={search}
+                  onChange={(e) =>
+                    setSearch(e.target.value)
+                  }
+                  placeholder="جستجوی نام کالا، بارکد یا گروه کالا..."
+                />
+              </div>
+            </div>
+
+            {/* جدول کالاها */}
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ردیف</th>
+                    <th>بارکد کالا</th>
+                    <th>نام کالا</th>
+                    <th>گروه کالا</th>
+                    <th>تعداد در کارتن</th>
+                    <th>سفارش به کارتن</th>
+                    <th>سفارش به جزء</th>
+                    <th>قیمت مصرف‌کننده</th>
+                    <th>تخفیف</th>
+                    <th>قیمت خرید نهایی</th>
+                    <th>جمع کل پرداختی</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredProducts.map(
+                    (product, index) => {
+                      const quantity =
+                        getQuantity(product.id);
+
+                      const cartonSize =
+                        Math.max(
+                          Number(
+                            product.quantity_per_carton ||
+                              1
+                          ),
+                          1
+                        );
+
+                      const discount =
+                        getDiscountForCategory(
+                          product.category
+                        );
+
+                      const finalPrice =
+                        getFinalPrice(product);
+
+                      const cartons =
+                        Number(
+                          quantity.cartons || 0
+                        );
+
+                      const units =
+                        Number(
+                          quantity.units || 0
+                        );
+
+                      const totalUnits =
+                        cartons *
+                          cartonSize +
+                        units;
+
+                      const rowTotal =
+                        totalUnits *
+                        finalPrice;
+
+                      return (
+                        <tr
+                          key={product.id}
+                        >
+                          <td>
+                            {toPersianDigits(
+                              index + 1
+                            )}
+                          </td>
+
+                          <td>
+                            {product.barcode ||
+                              "-"}
+                          </td>
+
+                          <td>
+                            <strong>
+                              {product.name}
+                            </strong>
+                          </td>
+
+                          <td>
+                            {product.category ||
+                              "-"}
+                          </td>
+
+                          <td>
+                            {toPersianDigits(
+                              cartonSize
+                            )}
+                          </td>
+
+                          <td
+                            style={{
+                              minWidth: 120,
+                            }}
+                          >
+                            <input
+                              className="input"
+                              type="text"
+                              inputMode="numeric"
+                              value={
+                                quantity.cartons
+                                  ? toPersianDigits(
+                                      quantity.cartons
+                                    )
+                                  : ""
+                              }
+                              onChange={(e) =>
+                                updateQuantity(
+                                  product.id,
+                                  "cartons",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="کارتن"
+                            />
+                          </td>
+
+                          <td
+                            style={{
+                              minWidth: 120,
+                            }}
+                          >
+                            <input
+                              className="input"
+                              type="text"
+                              inputMode="numeric"
+                              value={
+                                quantity.units
+                                  ? toPersianDigits(
+                                      quantity.units
+                                    )
+                                  : ""
+                              }
+                              onChange={(e) =>
+                                updateQuantity(
+                                  product.id,
+                                  "units",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="عدد"
+                            />
+                          </td>
+
+                          <td>
+                            {money(
+                              product.consumer_price
+                            )}
+                          </td>
+
+                          <td>
+                            <strong>
+                              {toPersianDigits(
+                                discount
+                              )}
+                              ٪
+                            </strong>
+                          </td>
+
+                          <td>
+                            <strong>
+                              {money(
+                                finalPrice
+                              )}
+                            </strong>
+                          </td>
+
+                          <td>
+                            {totalUnits > 0
+                              ? money(rowTotal)
+                              : "-"}
+                          </td>
+                        </tr>
+                      );
+                    }
+                  )}
+
+                  {filteredProducts.length ===
+                    0 && (
+                    <tr>
+                      <td
+                        colSpan={11}
+                        style={{
+                          textAlign: "center",
+                          padding: 30,
+                        }}
+                      >
+                        کالایی پیدا نشد.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* جمع سفارش */}
+
+            <div
+              style={{
+                marginTop: 20,
+                padding: 18,
+                borderRadius: 12,
+                background: "#f8fafc",
+                display: "flex",
+                justifyContent:
+                  "space-between",
+                alignItems: "center",
+                gap: 15,
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <span
+                  style={{
+                    color: "#64748b",
+                  }}
+                >
+                  تعداد ردیف‌های سفارش:
+                </span>
+
+                <strong
+                  style={{
+                    marginRight: 8,
+                  }}
+                >
+                  {toPersianDigits(
+                    orderItems.length
+                  )}
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+              >
+                جمع کل پرداختی:
+                <span
+                  style={{
+                    marginRight: 8,
+                  }}
+                >
+                  {money(orderTotal)}
+                </span>
+              </div>
+            </div>
+
+            {/* دکمه‌ها */}
+
+            <div
+              className="action-row"
+              style={{
+                marginTop: 20,
+              }}
+            >
+              <button
+                className="btn btn-primary"
+                onClick={createOrder}
+                disabled={saving}
+              >
+                <Check size={16} />
+
+                {saving
+                  ? "در حال ثبت..."
+                  : "ثبت و ارسال سفارش"}
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={closeOrderModal}
+                disabled={saving}
+              >
+                انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------ */}
+      {/* جزئیات سفارش */}
+      {/* ------------------------------------------------ */}
+
+      {detail && (
+        <div className="modal-backdrop">
+          <div
+            className="modal"
+            style={{
+              maxWidth: 1200,
+              width: "95%",
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2
+                  style={{
+                    margin: 0,
+                  }}
+                >
+                  جزئیات سفارش {detail.id}
+                </h2>
+
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: "#64748b",
+                    fontSize: 13,
+                  }}
+                >
+                  {formatDate(
+                    detail.created_at
+                  )}
+                </div>
+              </div>
+
+              <button
+                className="close-btn"
+                onClick={() =>
+                  setDetail(null)
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            {/* اطلاعات */}
+
+            <div
+              className="form-grid"
+              style={{
+                marginBottom: 20,
+              }}
+            >
+              <div className="form-field">
+                <label>مشتری</label>
+
+                <div
+                  style={{
+                    padding: 12,
+                    background: "#f8fafc",
+                    borderRadius: 8,
+                  }}
+                >
+                  {detail.customer_name}
+                </div>
+              </div>
+
+              <div className="form-field">
+                <label>ویزیتور</label>
+
+                <div
+                  style={{
+                    padding: 12,
+                    background: "#f8fafc",
+                    borderRadius: 8,
+                  }}
+                >
+                  {detail.visitor || "-"}
+                </div>
+              </div>
+
+              <div className="form-field">
+                <label>وضعیت</label>
+
+                <div
+                  style={{
+                    padding: 12,
+                  }}
+                >
+                  {(() => {
+                    const status =
+                      statusInfo(
+                        detail.status
+                      );
+
+                    return (
+                      <span
+                        className={`badge ${status.className}`}
+                      >
+                        {status.label}
+                      </span>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* اقلام سفارش */}
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ردیف</th>
+                    <th>بارکد</th>
+                    <th>کالا</th>
+                    <th>گروه</th>
+                    <th>کارتن</th>
+                    <th>جزء</th>
+                    <th>قیمت مصرف‌کننده</th>
+                    <th>تخفیف</th>
+                    <th>قیمت خرید نهایی</th>
+                    <th>جمع</th>
+                  </tr>
+                </thead>
+console.log("ITEMS INSIDE TABLE:", detail.order_items);
+                <tbody>
+                  {(detail.order_items ||
+                    []).map(
+                    (item, index) => (
+                      <tr
+                        key={
+                          item.productId ||
+                          index
+                        }
+                      >
+                        <td>
+                          {toPersianDigits(
+                            index + 1
+                          )}
+                        </td>
+
+                        <td>
+                          {item.products?.barcode || "-"}
+                        </td>
+
+                        <td>
+                          {item.products?.name || "-"}
+                        </td>
+
+                        <td>
+                          {item.products?.category || "-"}
+                        </td>
+
+                        <td>
+                         {toPersianDigits(item.order_cartons || 0)}
+                        </td>
+
+                        <td>
+                         {toPersianDigits(item.order_units || 0)}
+                        </td>
+
+                        <td>
+                          {money(item.consumer_price)}
+                        </td>
+
+                        <td>
+                          {toPersianDigits(item.discount_percent || 0)}
+                          ٪
+                        </td>
+
+                        <td>
+                          <strong>
+                            {money(item.final_purchase_price)}
+                          </strong>
+                        </td>
+
+                        <td>
+                          <strong>
+                            {money(
+                              item.total
+                            )}
+                          </strong>
+                        </td>
+                      </tr>
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* جمع */}
+
+            <div
+              style={{
+                marginTop: 20,
+                padding: 18,
+                background: "#f8fafc",
+                borderRadius: 12,
+                textAlign: "left",
+                fontSize: 18,
+                fontWeight: 900,
+              }}
+            >
+              جمع کل پرداختی:
+              <span
+                style={{
+                  marginRight: 8,
+                }}
+              >
+                {money(detail.invoice_total)}
+              </span>
+            </div>
+
+            {/* عملیات */}
+
+            <div
+              className="action-row"
+              style={{
+                marginTop: 20,
+              }}
+            >
+              {detail.status ===
+                "pending" && (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "approved"
+                      )
+                    }
+                  >
+                    <Check size={16} />
+                    تایید سفارش
+                  </button>
+
+                  <button
+                    className="btn btn-danger"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "cancelled"
+                      )
+                    }
+                  >
+                    <X size={16} />
+                    ابطال سفارش
+                  </button>
+                </>
+              )}
+
+              {detail.status ===
+                "approved" && (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "delivered"
+                      )
+                    }
+                  >
+                    <Check size={16} />
+                    تایید تحویل کامل
+                  </button>
+
+                  <button
+                    className="btn btn-danger"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "cancelled"
+                      )
+                    }
+                  >
+                    <X size={16} />
+                    ابطال سفارش
+                  </button>
+                </>
+              )}
+
+              {detail.status ===
+                "cancelled" && (
+                <span
+                  style={{
+                    color: "#dc2626",
+                    fontWeight: 700,
+                  }}
+                >
+                  این سفارش باطل شده است.
+                </span>
+              )}
+
+              {detail.status ===
+                "delivered" && (
+                <span
+                  style={{
+                    color: "#16a34a",
+                    fontWeight: 700,
+                  }}
+                >
+                  این سفارش تحویل شده است.
+                </span>
+              )}
+
+              <button
+                className="btn btn-danger"
+                onClick={() =>
+                  deleteOrder(detail.id)
+                }
+              >
+                <Trash2 size={15} />
+                حذف سفارش
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AppShell>
+  );
 }

@@ -5,7 +5,10 @@ import { Plus, Trash2 } from "lucide-react";
 
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
+import NumberInput from "@/components/NumberInput";
+
 import { supabase } from "@/lib/supabase";
+import { money } from "@/lib/format";
 
 import DatePicker from "react-multi-date-picker";
 import persian from "react-date-object/calendars/persian";
@@ -51,14 +54,13 @@ customers?:Customer;
 
 
 
-
-const emptyForm={
+const emptyForm = {
 
 customer_id:"",
 
-start_date:"",
+start_date:null as any,
 
-end_date:"",
+end_date:null as any,
 
 shelf_rent:0,
 
@@ -81,7 +83,6 @@ foc_amount:0
 export default function MarketingPage(){
 
 
-
 const [customers,setCustomers]=useState<Customer[]>([]);
 
 const [items,setItems]=useState<Marketing[]>([]);
@@ -101,6 +102,7 @@ loadCustomers();
 loadMarketing();
 
 },[]);
+
 
 
 
@@ -139,8 +141,9 @@ setCustomers(data || []);
 
 
 
-async function loadMarketing(){
 
+
+async function loadMarketing(){
 
 
 const {data,error}=await supabase
@@ -186,6 +189,33 @@ setItems(data || []);
 
 
 
+
+
+function convertDate(value:any){
+
+
+if(!value)
+
+return null;
+
+
+
+return value
+.toDate()
+.toISOString()
+.split("T")[0];
+
+
+}
+
+
+
+
+
+
+
+
+
 function total(){
 
 
@@ -214,29 +244,19 @@ Number(form.foc_amount)
 
 
 
-function money(v:number){
-
-return new Intl.NumberFormat("fa-IR")
-.format(v || 0);
-
-}
 
 
+function showDate(value:string){
 
 
+if(!value)
 
-
-
-
-function showDate(date:string){
-
-
-if(!date) return "-";
+return "-";
 
 
 return new Intl.DateTimeFormat(
 "fa-IR"
-).format(new Date(date));
+).format(new Date(value));
 
 
 }
@@ -263,31 +283,40 @@ return;
 
 
 
-
-
 const {error}=await supabase
 
 .from("customer_marketing")
 
 .insert({
 
+
 customer_id:form.customer_id,
 
-start_date:form.start_date,
 
-end_date:form.end_date,
+start_date:convertDate(form.start_date),
+
+
+end_date:convertDate(form.end_date),
+
 
 shelf_rent:Number(form.shelf_rent),
 
+
 tray_rent:Number(form.tray_rent),
+
 
 board_rent:Number(form.board_rent),
 
+
 promoter_cost:Number(form.promoter_cost),
+
 
 side_cost:Number(form.side_cost),
 
+
 foc_amount:Number(form.foc_amount)
+
+
 
 });
 
@@ -302,7 +331,6 @@ alert(error.message);
 return;
 
 }
-
 
 
 
@@ -325,6 +353,7 @@ loadMarketing();
 
 
 async function remove(id:string){
+
 
 
 if(!confirm("حذف شود؟"))
@@ -354,6 +383,7 @@ return;
 
 loadMarketing();
 
+
 }
 
 
@@ -367,7 +397,6 @@ loadMarketing();
 return (
 
 <AppShell>
-
 
 
 <PageHeader
@@ -420,19 +449,7 @@ onClick={()=>setModal(true)}
 
 <th>تا تاریخ</th>
 
-<th>سرلاین</th>
-
-<th>سینی</th>
-
-<th>تابلو</th>
-
-<th>پروموت</th>
-
-<th>جانبی</th>
-
-<th>FOC</th>
-
-<th>جمع کل</th>
+<th>مبلغ کل</th>
 
 <th>عملیات</th>
 
@@ -449,32 +466,43 @@ onClick={()=>setModal(true)}
 
 items.map(item=>(
 
+
 <tr key={item.id}>
 
 
-<td>{item.customers?.name}</td>
+<td>
 
-<td>{item.customers?.province}</td>
+{item.customers?.name}
 
-<td>{item.customers?.visitor}</td>
-
-
-<td>{showDate(item.start_date)}</td>
-
-<td>{showDate(item.end_date)}</td>
+</td>
 
 
-<td>{money(item.shelf_rent)}</td>
+<td>
 
-<td>{money(item.tray_rent)}</td>
+{item.customers?.province}
 
-<td>{money(item.board_rent)}</td>
+</td>
 
-<td>{money(item.promoter_cost)}</td>
 
-<td>{money(item.side_cost)}</td>
+<td>
 
-<td>{money(item.foc_amount)}</td>
+{item.customers?.visitor}
+
+</td>
+
+
+<td>
+
+{showDate(item.start_date)}
+
+</td>
+
+
+<td>
+
+{showDate(item.end_date)}
+
+</td>
 
 
 <td>
@@ -495,11 +523,13 @@ item.foc_amount
 
 )}
 
+ ریال
+
 </td>
 
 
-
 <td>
+
 
 <button
 
@@ -517,11 +547,10 @@ onClick={()=>remove(item.id)}
 </td>
 
 
-
 </tr>
 
-))
 
+))
 
 }
 
@@ -547,16 +576,20 @@ onClick={()=>remove(item.id)}
 
 <div className="modal-backdrop">
 
+
 <div className="modal">
 
 
 <div className="modal-header">
+
 
 <h2>
 
 ثبت مارکتینگ
 
 </h2>
+
+
 
 <button
 
@@ -577,13 +610,19 @@ onClick={()=>setModal(false)}
 
 
 
+
+
 <div className="form-grid">
 
 
 
 <div className="form-field">
 
-<label>فروشگاه</label>
+<label>
+
+فروشگاه
+
+</label>
 
 
 <select
@@ -614,7 +653,6 @@ customer_id:e.target.value
 </option>
 
 
-
 {
 
 customers.map(c=>(
@@ -639,8 +677,8 @@ value={c.id}
 
 </select>
 
-</div>
 
+</div>
 
 
 
@@ -650,7 +688,11 @@ value={c.id}
 
 <div className="form-field">
 
-<label>از تاریخ</label>
+<label>
+
+از تاریخ
+
+</label>
 
 
 <DatePicker
@@ -659,21 +701,22 @@ calendar={persian}
 
 locale={persian_fa}
 
+value={form.start_date}
+
 inputClass="input"
 
 onChange={(date:any)=>
-
 
 setForm({
 
 ...form,
 
-start_date:date?.format("YYYY-MM-DD")
+start_date:date
 
 })
 
-
 }
+
 
 />
 
@@ -684,9 +727,15 @@ start_date:date?.format("YYYY-MM-DD")
 
 
 
+
+
 <div className="form-field">
 
-<label>تا تاریخ</label>
+<label>
+
+تا تاریخ
+
+</label>
 
 
 <DatePicker
@@ -695,26 +744,29 @@ calendar={persian}
 
 locale={persian_fa}
 
+value={form.end_date}
+
 inputClass="input"
 
 onChange={(date:any)=>
-
 
 setForm({
 
 ...form,
 
-end_date:date?.format("YYYY-MM-DD")
+end_date:date
 
 })
 
-
 }
+
 
 />
 
 
 </div>
+
+
 
 
 
@@ -743,23 +795,28 @@ end_date:date?.format("YYYY-MM-DD")
 
 <div className="form-field" key={key}>
 
-<label>{label}</label>
 
-<input
+<label>
+
+{label}
+
+</label>
+
+
+
+<NumberInput
 
 className="input"
 
-type="number"
-
 value={form[key]}
 
-onChange={e=>
+onChange={(value)=>
 
 setForm({
 
 ...form,
 
-[key]:Number(e.target.value)
+[key]:value
 
 })
 
@@ -767,7 +824,9 @@ setForm({
 
 />
 
+
 </div>
+
 
 
 ))
@@ -784,13 +843,14 @@ setForm({
 
 
 
+
 <h3>
 
 جمع کل:
 
 {money(total())}
 
-تومان
+ ریال
 
 </h3>
 
@@ -800,6 +860,7 @@ setForm({
 
 
 <div className="action-row">
+
 
 <button
 
@@ -812,6 +873,7 @@ onClick={save}
 ذخیره
 
 </button>
+
 
 
 <button
@@ -831,7 +893,6 @@ onClick={()=>setModal(false)}
 
 
 
-
 </div>
 
 
@@ -842,8 +903,11 @@ onClick={()=>setModal(false)}
 
 
 
+
+
 </AppShell>
 
 );
+
 
 }

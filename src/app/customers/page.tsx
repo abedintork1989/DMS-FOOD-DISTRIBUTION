@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { Eye, Trash2, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
@@ -10,67 +11,47 @@ import { supabase } from "@/lib/supabase";
 
 type Customer = {
 
-id:string;
+  id:string;
 
-name:string;
+  name:string;
 
-phone:string | null;
+  owner_name:string | null;
 
-address:string | null;
+  phone:string | null;
 
-province:string | null;
+  province:string | null;
 
-responsible:string | null;
+  address:string | null;
 
-visitor:string | null;
+  visitor:string | null;
 
-entry_fee:number;
+  responsible:string | null;
 
-default_discount_percent:number;
-
-};
-
-
-
-const emptyCustomer:Customer={
-
-id:"",
-
-name:"",
-
-phone:"",
-
-address:"",
-
-province:"",
-
-responsible:"",
-
-visitor:"",
-
-entry_fee:0,
-
-default_discount_percent:0
+  active:boolean | null;
 
 };
-
-
 
 
 
 export default function CustomersPage(){
 
 
-const [customers,setCustomers]=useState<Customer[]>([]);
+const router = useRouter();
 
-const [form,setForm]=useState<Customer>(emptyCustomer);
 
-const [modal,setModal]=useState(false);
 
-const [search,setSearch]=useState("");
+const [customers,setCustomers]=
+useState<Customer[]>([]);
 
-const [loading,setLoading]=useState(true);
 
+
+const [loading,setLoading]=
+useState(true);
+
+
+
+const [search,setSearch]=
+useState("");
 
 
 
@@ -91,29 +72,58 @@ async function loadCustomers(){
 setLoading(true);
 
 
+
 const {data,error}=await supabase
 
 .from("customers")
 
-.select("*")
+.select(`
 
-.order("created_at",{ascending:false});
+id,
+
+name,
+
+owner_name,
+
+phone,
+
+province,
+
+address,
+
+visitor,
+
+responsible,
+
+active
+
+`)
+
+.order("name");
 
 
 
 if(error){
 
-alert(error.message);
+console.error(error);
+
+alert(
+"خطا در دریافت مشتریان:\n"+
+error.message
+);
 
 setLoading(false);
 
 return;
 
 }
+
 
 
 setCustomers(data || []);
 
+
+
 setLoading(false);
 
 
@@ -125,166 +135,18 @@ setLoading(false);
 
 
 
-function openNew(){
+async function deleteCustomer(id:string){
 
 
-setForm({
 
-...emptyCustomer,
+const ok =
+confirm(
+"آیا از حذف این مشتری مطمئن هستید؟"
+);
 
-id:""
 
-});
 
-
-setModal(true);
-
-
-}
-
-
-
-
-
-
-function edit(customer:Customer){
-
-
-setForm(customer);
-
-setModal(true);
-
-
-}
-
-
-
-
-
-
-
-
-async function save(){
-
-
-if(!form.name.trim()){
-
-alert("نام فروشگاه الزامی است");
-
-return;
-
-}
-
-
-
-let error;
-
-
-
-if(form.id){
-
-
-const result=await supabase
-
-.from("customers")
-
-.update({
-
-name:form.name,
-
-phone:form.phone,
-
-address:form.address,
-
-province:form.province,
-
-responsible:form.responsible,
-
-visitor:form.visitor,
-
-entry_fee:Number(form.entry_fee),
-
-default_discount_percent:Number(form.default_discount_percent)
-
-})
-
-.eq("id",form.id);
-
-
-
-error=result.error;
-
-
-}
-
-else{
-
-
-const result=await supabase
-
-.from("customers")
-
-.insert({
-
-name:form.name,
-
-phone:form.phone,
-
-address:form.address,
-
-province:form.province,
-
-responsible:form.responsible,
-
-visitor:form.visitor,
-
-entry_fee:Number(form.entry_fee),
-
-default_discount_percent:Number(form.default_discount_percent)
-
-});
-
-
-error=result.error;
-
-
-}
-
-
-
-
-
-
-if(error){
-
-alert(error.message);
-
-return;
-
-}
-
-
-
-setModal(false);
-
-loadCustomers();
-
-
-}
-
-
-
-
-
-
-
-
-
-async function remove(id:string){
-
-
-if(!confirm("این مشتری حذف شود؟"))
-
+if(!ok)
 return;
 
 
@@ -299,9 +161,18 @@ const {error}=await supabase
 
 
 
+
+
 if(error){
 
-alert(error.message);
+
+alert(
+
+"خطا در حذف مشتری:\n"+
+error.message
+
+);
+
 
 return;
 
@@ -309,22 +180,15 @@ return;
 
 
 
+
+
+alert("مشتری حذف شد");
+
+
+
 loadCustomers();
 
 
-}
-
-
-
-
-
-
-
-function money(value:number){
-
-return new Intl.NumberFormat("fa-IR")
-
-.format(value || 0);
 
 }
 
@@ -333,27 +197,68 @@ return new Intl.NumberFormat("fa-IR")
 
 
 
-
-const filtered=customers.filter(c=>{
-
-
-const text=(
-
-c.name+
-
-c.phone+
-
-c.province+
-
-c.visitor+
-
-c.responsible
-
-).toLowerCase();
+function openCustomer(id:string){
 
 
 
-return text.includes(search.toLowerCase());
+if(!id){
+
+alert(
+"شناسه مشتری وجود ندارد"
+);
+
+return;
+
+}
+
+
+
+router.push(
+`/customers/${id}`
+);
+
+
+
+}
+
+
+
+
+
+
+const filteredCustomers =
+
+customers.filter(c=>{
+
+
+const text =
+
+[
+
+c.name,
+
+c.owner_name,
+
+c.phone,
+
+c.province,
+
+c.visitor
+
+]
+
+.filter(Boolean)
+
+.join(" ")
+
+.toLowerCase();
+
+
+
+return text.includes(
+search.toLowerCase()
+);
+
 
 
 });
@@ -369,32 +274,14 @@ return (
 <AppShell>
 
 
+
 <PageHeader
 
 title="مشتریان"
 
 subtitle="مدیریت اطلاعات مشتریان"
 
-action={
-
-<button
-
-className="btn btn-primary"
-
-onClick={openNew}
-
->
-
-<Plus size={16}/>
-
-مشتری جدید
-
-</button>
-
-}
-
 />
-
 
 
 
@@ -403,48 +290,64 @@ onClick={openNew}
 <div className="panel">
 
 
-<div className="toolbar">
 
+<div
+style={{
+position:"relative",
+marginBottom:20
+}}
+>
 
-<div style={{position:"relative"}}>
 
 
 <Search
 
-size={16}
+size={18}
 
 style={{
 
 position:"absolute",
 
-right:10,
+right:12,
 
-top:12
+top:12,
+
+color:"#94a3b8"
 
 }}
 
 />
 
 
+
 <input
 
 className="input"
 
-style={{paddingRight:35}}
+style={{
+
+paddingRight:40
+
+}}
 
 placeholder="جستجوی مشتری..."
 
 value={search}
 
-onChange={e=>setSearch(e.target.value)}
+onChange={(e)=>
+
+setSearch(
+e.target.value
+)
+
+}
 
 />
 
 
-</div>
-
 
 </div>
+
 
 
 
@@ -454,44 +357,78 @@ onChange={e=>setSearch(e.target.value)}
 <div className="table-wrap">
 
 
+
 {
 
 loading ?
 
-<div className="empty">
+
+<div
+style={{
+padding:40,
+textAlign:"center"
+}}
+>
 
 در حال دریافت اطلاعات...
 
 </div>
+
 
 :
 
 <table>
 
 
+
 <thead>
+
 
 <tr>
 
-<th>فروشگاه</th>
 
-<th>مسئول</th>
+<th>
+نام مشتری
+</th>
 
-<th>تلفن</th>
 
-<th>استان</th>
+<th>
+مالک
+</th>
 
-<th>ویزیتور</th>
 
-<th>ورودیه</th>
+<th>
+تلفن
+</th>
 
-<th>تخفیف</th>
 
-<th>عملیات</th>
+<th>
+استان
+</th>
+
+
+<th>
+ویزیتور
+</th>
+
+
+<th>
+وضعیت
+</th>
+
+
+<th>
+عملیات
+</th>
+
 
 </tr>
 
+
 </thead>
+
+
+
 
 
 
@@ -499,71 +436,307 @@ loading ?
 <tbody>
 
 
+
 {
 
-filtered.map(c=>(
+
+filteredCustomers.map(customer=>(
 
 
-<tr key={c.id}>
+
+<tr
 
 
-<td>{c.name}</td>
+key={customer.id}
 
 
-<td>{c.responsible}</td>
+
+style={{
+
+cursor:"pointer"
+
+}}
 
 
-<td>{c.phone}</td>
+
+onClick={()=>openCustomer(customer.id)}
 
 
-<td>{c.province}</td>
+
+>
 
 
-<td>{c.visitor}</td>
 
 
-<td>{money(c.entry_fee)}</td>
+
+<td>
+
+<strong>
+
+{customer.name}
+
+</strong>
 
 
-<td>{c.default_discount_percent}%</td>
+</td>
+
+
+
+
+
+<td>
+
+{
+customer.owner_name || "-"
+}
+
+
+</td>
+
+
+
+
+
+<td>
+
+{
+customer.phone || "-"
+}
+
+
+</td>
+
+
+
+
+
+<td>
+
+{
+customer.province || "-"
+}
+
+
+</td>
+
+
+
+
+
+<td>
+
+{
+customer.visitor || "-"
+}
+
+
+</td>
+
+
+
 
 
 
 <td>
 
 
-<div className="action-row">
+
+<span
+
+className={
+
+customer.active
+
+?
+
+"badge success"
+
+:
+
+"badge danger"
+
+}
+
+>
+
+
+{
+
+customer.active
+
+?
+
+"فعال"
+
+:
+
+"غیرفعال"
+
+}
+
+
+</span>
+
+
+
+</td>
+
+
+
+
+
+
+
+<td>
+
+
+
+<div
+
+style={{
+
+display:"flex",
+
+gap:8
+
+}}
+
+>
+
+
+
 
 
 <button
+
 
 className="btn btn-secondary btn-small"
 
-onClick={()=>edit(c)}
+
+
+onClick={(e)=>{
+
+
+e.stopPropagation();
+
+
+
+openCustomer(
+customer.id
+);
+
+
+
+}}
+
+
 
 >
 
-<Pencil size={14}/>
+
+<Eye size={15}/>
+
+مشاهده
+
 
 </button>
+
+
+
+
 
 
 
 <button
 
+
 className="btn btn-danger btn-small"
 
-onClick={()=>remove(c.id)}
+
+
+onClick={(e)=>{
+
+
+e.stopPropagation();
+
+
+
+deleteCustomer(
+customer.id
+);
+
+
+
+}}
+
+
 
 >
 
-<Trash2 size={14}/>
+
+<Trash2 size={15}/>
+
+حذف
+
 
 </button>
+
+
+
 
 
 
 </div>
+
+
+
+</td>
+
+
+
+
+
+
+</tr>
+
+
+
+))
+
+
+
+}
+
+
+
+
+
+
+
+{
+
+filteredCustomers.length===0 &&
+
+
+<tr>
+
+
+<td
+
+colSpan={7}
+
+style={{
+
+textAlign:"center",
+
+padding:30
+
+}}
+
+>
+
+
+مشتری‌ای پیدا نشد
 
 
 </td>
@@ -572,265 +745,23 @@ onClick={()=>remove(c.id)}
 </tr>
 
 
-))
-
 
 }
+
+
 
 
 
 </tbody>
 
 
+
 </table>
 
 
-}
-
-
-</div>
-
-
-</div>
-
-
-
-
-
-
-
-
-
-
-{
-
-modal &&
-
-
-<div className="modal-backdrop">
-
-
-<div className="modal">
-
-
-<div className="modal-header">
-
-
-<h2>
-
-{
-
-form.id ?
-
-"ویرایش مشتری"
-
-:
-
-"مشتری جدید"
 
 }
 
-</h2>
-
-
-
-<button
-
-className="close-btn"
-
-onClick={()=>setModal(false)}
-
->
-
-×
-
-</button>
-
-
-</div>
-
-
-
-
-
-<div className="form-grid">
-
-
-
-{
-
-[
-
-["name","نام فروشگاه"],
-
-["responsible","مسئول"],
-
-["phone","شماره تماس"],
-
-["province","استان"],
-
-["visitor","ویزیتور"]
-
-].map(([key,label])=>(
-
-
-<div className="form-field" key={key}>
-
-
-<label>{label}</label>
-
-
-<input
-
-className="input"
-
-value={(form as any)[key] || ""}
-
-onChange={e=>
-
-setForm({
-
-...form,
-
-[key]:e.target.value
-
-})
-
-}
-
-/>
-
-
-</div>
-
-
-))
-
-
-}
-
-
-
-
-
-
-<div className="form-field">
-
-
-<label>
-
-مبلغ ورودیه
-
-</label>
-
-
-<input
-
-className="input"
-
-type="number"
-
-value={form.entry_fee}
-
-onChange={e=>
-
-setForm({
-
-...form,
-
-entry_fee:Number(e.target.value)
-
-})
-
-}
-
-/>
-
-
-</div>
-
-
-
-
-
-
-
-<div className="form-field">
-
-
-<label>
-
-درصد تخفیف پایه
-
-</label>
-
-
-<input
-
-className="input"
-
-type="number"
-
-value={form.default_discount_percent}
-
-onChange={e=>
-
-setForm({
-
-...form,
-
-default_discount_percent:Number(e.target.value)
-
-})
-
-}
-
-/>
-
-
-</div>
-
-
-
-
-
-
-
-<div className="form-field full">
-
-
-<label>
-
-آدرس
-
-</label>
-
-
-<textarea
-
-className="textarea"
-
-rows={3}
-
-value={form.address || ""}
-
-onChange={e=>
-
-setForm({
-
-...form,
-
-address:e.target.value
-
-})
-
-}
-
-/>
-
-
-</div>
-
 
 
 
@@ -838,50 +769,9 @@ address:e.target.value
 
 
 
-
-
-
-<div className="action-row">
-
-
-<button
-
-className="btn btn-primary"
-
-onClick={save}
-
->
-
-ذخیره
-
-</button>
-
-
-<button
-
-className="btn btn-secondary"
-
-onClick={()=>setModal(false)}
-
->
-
-انصراف
-
-</button>
-
-
 </div>
 
 
-
-
-</div>
-
-
-</div>
-
-
-}
 
 
 
