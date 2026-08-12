@@ -1,81 +1,14 @@
+// Warehouse version - prepared for delivery cartons and delivery documents
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import DatePicker from "react-multi-date-picker";
-import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { supabase } from "@/lib/supabase";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
-
-
-function normalizePersianDigits(value: string) {
-  return value
-    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
-}
-
-function formatPersianDate(value: string) {
-  return value || "";
-}
-
-// تبدیل تاریخ شمسی انتخاب شده در تقویم به تاریخ میلادی برای Supabase
-function jalaliToGregorian(jy: number, jm: number, jd: number) {
-  jy -= 979;
-  let days =
-    365 * jy +
-    Math.floor(jy / 33) * 8 +
-    Math.floor(((jy % 33) + 3) / 4) +
-    78 +
-    jd +
-    (jm < 7 ? (jm - 1) * 31 : (jm - 7) * 30 + 186);
-
-  let gy = 1600 + 400 * Math.floor(days / 146097);
-  days %= 146097;
-
-  if (days > 36524) {
-    gy += 100 * Math.floor(--days / 36524);
-    days %= 36524;
-
-    if (days >= 365) days++;
-  }
-
-  gy += 4 * Math.floor(days / 1461);
-  days %= 1461;
-
-  if (days > 365) {
-    gy += Math.floor((days - 1) / 365);
-    days = (days - 1) % 365;
-  }
-
-  const gd = days + 1;
-  const sal_a = [
-    0,
-    31,
-    ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31
-  ];
-
-  let gm = 0;
-  let day = gd;
-
-  while (gm < 13 && day > sal_a[gm]) {
-    day -= sal_a[gm];
-    gm++;
-  }
-
-  return `${gy}-${String(gm).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-}
 
 type Product = {
   id: string;
@@ -99,96 +32,69 @@ export default function OrderDetailPage() {
   const [saving, setSaving] = useState(false);
   const [discounts, setDiscounts] = useState<any[]>([]);
 
-  // تاریخ ارسال سفارش (شمسی مستقل)
-  const [sendDate, setSendDate] = useState("");
-  const [showSendPicker, setShowSendPicker] = useState(false);
+  // تاریخ تحویل سفارش (شمسی در رابط کاربری)
+  const [deliveryDate, setDeliveryDate] = useState("");
 
-  // تبدیل هر نوع تاریخ دیتابیس به نمایش شمسی
-  // created_at معمولاً ISO/Gregorian است
-  // delivery_date ممکن است تاریخ میلادی یا شمسی باشد
-  function toJalaliDate(dateValue: any) {
-    if (!dateValue) return "-";
+  // نمایش تاریخ تحویل:
+  // چون تاریخ در دیتابیس به صورت شمسی ذخیره می‌شود (مثلاً 1405/03/03)
+  // نباید با new Date() پردازش شود؛ جاوااسکریپت آن را میلادی فرض می‌کند
+  // و باعث تاریخ‌های اشتباه مثل سال‌های ۷۰۰ و ۸۰۰ می‌شود.
+  function formatPersianDate(value: string | null | undefined) {
+    if (!value) return "-";
 
     try {
-      const value = String(dateValue).trim();
+      const clean = String(value).trim();
 
-      // اگر قبلاً شمسی ذخیره شده باشد
-      const jalaliParts = value.split(" ")[0].split("/");
-      if (
-        jalaliParts.length === 3 &&
-        Number(jalaliParts[0]) > 1300 &&
-        Number(jalaliParts[0]) < 1500
-      ) {
-        const months = [
-          "فروردین","اردیبهشت","خرداد","تیر",
-          "مرداد","شهریور","مهر","آبان",
-          "آذر","دی","بهمن","اسفند"
-        ];
+      // تاریخ در دیتابیس شمسی ذخیره شده است:
+      // مثال: 1405/05/23 12:30:00
+      // فقط همان فرمت ذخیره شده را برای نمایش برمی‌گردانیم.
+      // تبدیل به Date یا locale فارسی باعث نمایش عددی اشتباه مثل ۱٬۴۰۵ می‌شود.
 
-        return `${Number(jalaliParts[2])} ${months[Number(jalaliParts[1]) - 1]} ${jalaliParts[0]}`;
+      const datePart = clean.split(" ")[0];
+      const parts = datePart.split("/");
+
+      if (parts.length === 3) {
+        const [year, month, day] = parts;
+
+        const y = String(year).trim();
+        const m = String(month).padStart(2, "0");
+        const d = String(day).padStart(2, "0");
+
+        return `${y}/${m}/${d}`;
       }
 
-      // تاریخ میلادی (created_at و delivery_date دیتابیس)
-      const date = new Date(value);
-
-      if (!isNaN(date.getTime())) {
-        const jalali = new DateObject({
-          date,
-          calendar: persian,
-          locale: persian_fa,
-        });
-
-        const months = [
-          "فروردین","اردیبهشت","خرداد","تیر",
-          "مرداد","شهریور","مهر","آبان",
-          "آذر","دی","بهمن","اسفند"
-        ];
-
-        return `${jalali.day} ${months[jalali.month.number - 1]} ${jalali.year}`;
-      }
-
-      return value;
+      return clean;
     } catch {
       return "-";
     }
   }
 
-  // مقدار مناسب برای DatePicker شمسی
-  function toPersianDateValue(dateValue: any) {
-    if (!dateValue) return "";
+  // تاریخ تحویل فقط تاریخ نیست؛ برای حفظ زمان ثبت، timestamp کامل نگه می‌داریم.
+  // خروجی شمسی برای نمایش و ذخیره در فیلد متنی/تاریخی سفارش استفاده می‌شود.
+  function formatDeliveryDate(date: any) {
+    if (!date) return null;
 
     try {
-      const value = String(dateValue).trim();
+      const now = new Date();
 
-      const parts = value.split(" ")[0].split("/");
+      // DatePicker با تقویم Persian مقدار year/month/day را شمسی برمی‌گرداند.
+      const yyyy = String(date.year);
+      const mm = String(date.month.number).padStart(2, "0");
+      const dd = String(date.day).padStart(2, "0");
 
-      // قبلاً شمسی بوده
-      if (
-        parts.length === 3 &&
-        Number(parts[0]) > 1300 &&
-        Number(parts[0]) < 1500
-      ) {
-        return `${parts[0]}/${String(parts[1]).padStart(2,"0")}/${String(parts[2]).padStart(2,"0")}`;
-      }
-
-      // میلادی را به شمسی تبدیل کن
-      const date = new Date(value);
-
-      if (!isNaN(date.getTime())) {
-        const jalali = new DateObject({
-          date,
-          calendar: persian,
-          locale: persian_fa,
-        });
-
-        return `${jalali.year}/${String(jalali.month.number).padStart(2,"0")}/${String(jalali.day).padStart(2,"0")}`;
-      }
-
-      return "";
-    } catch {
-      return "";
+      return `${yyyy}/${mm}/${dd}`;
+    } catch (error) {
+      console.log("DATE FORMAT ERROR:", error);
+      return null;
     }
   }
+
+  // مستندات تحویلی انبار
+  const [deliveryDocuments, setDeliveryDocuments] = useState<
+    { name: string; path: string }[]
+  >([]);
+  const [selectedDeliveryFiles, setSelectedDeliveryFiles] = useState<File[]>([]);
+  const deliveryDocumentsBucket = "delivery-documents";
 
   // افزودن کالای جدید
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -249,11 +155,12 @@ export default function OrderDetailPage() {
 
       const finalData = { ...orderData, order_items: items || [] };
       setOrder(finalData);
-      setEditedItems(finalData.order_items || []);
 
-      setSendDate(
-        toPersianDateValue(orderData.send_date)
-      );
+      // مقدار تاریخ ذخیره شده را برای نمایش مجدد در DatePicker برمی‌گردانیم
+      setDeliveryDate(orderData.delivery_date || "");
+
+      setEditedItems(finalData.order_items || []);
+      await loadDeliveryDocuments();
 
       if (orderData.customer_id) {
         const { data: discountData, error: discountError } = await supabase
@@ -272,6 +179,90 @@ export default function OrderDetailPage() {
       console.log("LOAD ORDER ERROR:", error);
     }
     setLoading(false);
+  }
+
+  async function loadDeliveryDocuments() {
+    if (!id) return;
+
+    const { data, error } = await supabase.storage
+      .from(deliveryDocumentsBucket)
+      .list(id, {
+        limit: 100,
+        sortBy: { column: "created_at", order: "desc" },
+      });
+
+    if (error) {
+      console.log("DELIVERY DOCUMENTS LIST ERROR:", error);
+      setDeliveryDocuments([]);
+      return;
+    }
+
+    setDeliveryDocuments(
+      (data || [])
+        .filter((file: any) => file.name)
+        .map((file: any) => ({
+          name: file.name,
+          path: `${id}/${file.name}`,
+        }))
+    );
+  }
+
+  function handleDeliveryFilesChange(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const files = Array.from(event.target.files || []);
+    const allowed = files.filter(
+      (file) =>
+        file.type === "application/pdf" ||
+        file.type.startsWith("image/")
+    );
+
+    if (allowed.length !== files.length) {
+      alert("فقط فایل PDF و تصویر قابل انتخاب است.");
+    }
+
+    setSelectedDeliveryFiles((previous) => [...previous, ...allowed]);
+    event.target.value = "";
+  }
+
+  async function openDeliveryDocument(path: string) {
+    const { data, error } = await supabase.storage
+      .from(deliveryDocumentsBucket)
+      .createSignedUrl(path, 60 * 10);
+
+    if (error || !data?.signedUrl) {
+      console.log("DELIVERY DOCUMENT OPEN ERROR:", error);
+      alert(`خطا در باز کردن مستند: ${error?.message || "لینک فایل ساخته نشد."}`);
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function uploadDeliveryDocuments() {
+    if (!selectedDeliveryFiles.length) return true;
+
+    for (const file of selectedDeliveryFiles) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${id}/${Date.now()}-${safeName}`;
+
+      const { error } = await supabase.storage
+        .from(deliveryDocumentsBucket)
+        .upload(path, file, {
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (error) {
+        console.log("DELIVERY DOCUMENT UPLOAD ERROR:", error);
+        alert(`خطا در ذخیره مستند «${file.name}»: ${error.message}`);
+        return false;
+      }
+    }
+
+    setSelectedDeliveryFiles([]);
+    await loadDeliveryDocuments();
+    return true;
   }
 
   async function loadProducts() {
@@ -333,8 +324,32 @@ export default function OrderDetailPage() {
     return getOriginalCartons(item);
   }
 
-  // جمع هر ردیف بر اساس «تعداد نهایی سفارش» است،
-  // نه تعداد کارتن اولیه و نه quantity ویزیتور.
+  // جمع هر ردیف در انبار بر اساس «تعداد تحویلی (کارتن)» است.
+  // اگر هنوز مقدار تحویلی ثبت نشده باشد، مقدار تعداد نهایی سفارش نمایش داده می‌شود.
+  function getDeliveryCartons(item: any) {
+    const currentItem = getCurrentItem(item);
+
+    /*
+      منطق انبار:
+      - قبل از ورود به حالت ویرایش، تعداد تحویلی باید همان
+        تعداد نهایی سفارش باشد.
+      - بعد از ورود به ویرایش، مقدار delivery_cartons مستقل
+        است و مسئول انبار می‌تواند آن را تغییر دهد.
+    */
+
+    if (!isEditing) {
+      return getFinalOrderQuantity(currentItem);
+    }
+
+    const value = currentItem.delivery_cartons;
+
+    if (value !== null && value !== undefined && value !== "") {
+      return Math.max(0, Math.floor(Number(value)));
+    }
+
+    return getFinalOrderQuantity(currentItem);
+  }
+
   function calculateRowTotal(item: any) {
     const currentItem = getCurrentItem(item);
     const product = currentItem.products || {};
@@ -343,17 +358,19 @@ export default function OrderDetailPage() {
       1
     );
 
-    const finalCartons =
-      getFinalOrderQuantity(currentItem);
+    const deliveryUnits =
+      currentItem.delivery_units !== undefined &&
+      currentItem.delivery_units !== null
+        ? Number(currentItem.delivery_units)
+        : getDeliveryCartons(currentItem) * cartonSize;
 
     return (
-      finalCartons *
-      cartonSize *
+      deliveryUnits *
       Number(currentItem.final_price || 0)
     );
   }
 
-  // جمع کل سفارش نیز فقط بر اساس تعداد نهایی سفارش محاسبه می‌شود.
+  // جمع کل سفارش نیز بر اساس تعداد تحویلی محاسبه می‌شود.
   function calculateGrandTotal() {
     return editedItems.reduce(
       (sum: number, item: any) =>
@@ -363,7 +380,16 @@ export default function OrderDetailPage() {
   }
 
   function startEditing() {
-    setEditedItems(order.order_items || []);
+    const itemsWithDeliveryDefault = (order.order_items || []).map(
+      (item: any) => ({
+        ...item,
+        delivery_cartons:
+          item.final_order_quantity ??
+          getFinalOrderQuantity(item),
+      })
+    );
+
+    setEditedItems(itemsWithDeliveryDefault);
     setIsEditing(true);
   }
 
@@ -373,10 +399,6 @@ export default function OrderDetailPage() {
     setShowAddProduct(false);
     setSelectedProductIds({});
     setPendingCartons({});
-
-    setSendDate(
-      toPersianDateValue(order.send_date)
-    );
   }
 
   function openAddProduct() {
@@ -585,6 +607,14 @@ export default function OrderDetailPage() {
       return "در انتظار";
     }
 
+    if (value === "delivered" || value === "تحویل داده شد") {
+      return "تحویل داده شد";
+    }
+
+    if (value === "approved" || value === "در حال ارسال") {
+      return "در حال ارسال";
+    }
+
     if (value === "rejected" || value === "رد شده") {
       return "رد شده";
     }
@@ -592,7 +622,7 @@ export default function OrderDetailPage() {
     return status || "-";
   }
 
-  async function approveOrder() {
+  async function saveWarehouseChanges() {
     if (saving) return;
 
     // اگر کالاهایی در پنجره افزودن کالا انتخاب شده‌اند
@@ -765,8 +795,15 @@ export default function OrderDetailPage() {
           item.discount_percent || 0
         );
 
+        const deliveryCartons = Math.max(
+          0,
+          Math.floor(
+            Number(item.delivery_cartons ?? finalOrderQuantity)
+          )
+        );
+
         const total =
-          finalOrderQuantity *
+          deliveryCartons *
           cartonSize *
           finalPrice;
 
@@ -780,6 +817,8 @@ export default function OrderDetailPage() {
               // مهم: quantity را اصلاً تغییر نمی‌دهیم.
               final_order_quantity:
                 finalOrderQuantity,
+              delivery_cartons:
+                deliveryCartons,
               consumer_price:
                 consumerPrice,
               discount_percent:
@@ -813,7 +852,7 @@ export default function OrderDetailPage() {
           error: verifyItemError,
         } = await supabase
           .from("order_items")
-          .select("id, final_order_quantity")
+          .select("id, final_order_quantity, delivery_cartons")
           .eq("id", item.id)
           .maybeSingle();
 
@@ -860,6 +899,24 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           setSaving(false);
           return;
         }
+
+        if (
+          Number(savedItem.delivery_cartons ?? 0) !==
+          deliveryCartons
+        ) {
+          alert(
+            `تعداد تحویلی ذخیره نشد.
+
+شناسه کالا: ${item.id}
+مقدار موردنظر: ${deliveryCartons}
+مقدار موجود در دیتابیس: ${savedItem.delivery_cartons ?? 0}
+
+Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول order_items را بررسی کنید.`
+          );
+
+          setSaving(false);
+          return;
+        }
       }
 
       // =====================================================
@@ -900,6 +957,8 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
             // کالای جدید توسط ویزیتور ثبت نشده است؛ بنابراین تعداد اولیه = صفر.
             quantity: 0,
             final_order_quantity:
+              finalOrderQuantity,
+            delivery_cartons:
               finalOrderQuantity,
             consumer_price: Number(
               item.consumer_price || 0
@@ -983,20 +1042,9 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         await supabase
           .from("orders")
           .update({
-            status: "approved",
+            status: order.status,
             invoice_total: grandTotal,
-            send_date: sendDate
-              ? (() => {
-                  const parts = sendDate.split("/");
-                  if (parts.length !== 3) return null;
-
-                  return jalaliToGregorian(
-                    Number(parts[0]),
-                    Number(parts[1]),
-                    Number(parts[2])
-                  );
-                })()
-              : null,
+             delivery_date: deliveryDate ? deliveryDate : null,
           })
           .eq("id", id);
 
@@ -1007,7 +1055,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         );
 
         alert(
-          `خطا در تأیید سفارش: ${orderUpdateError.message}`
+          `خطا در ذخیره تغییرات سفارش: ${orderUpdateError.message}`
         );
 
         setSaving(false);
@@ -1019,7 +1067,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         error: verifyOrderError,
       } = await supabase
         .from("orders")
-        .select("id, status, invoice_total")
+        .select("id, status, invoice_total, delivery_date")
         .eq("id", id)
         .maybeSingle();
 
@@ -1041,18 +1089,32 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
 
       if (
         String(savedOrder.status).toLowerCase() !==
-        "approved"
+        String(order.status).toLowerCase()
       ) {
         alert(
-          `وضعیت سفارش هنوز approved نشده است.
-وضعیت فعلی دیتابیس: ${savedOrder.status}`
+          `تغییرات ذخیره شد اما وضعیت سفارش تغییر کرده است. وضعیت فعلی: ${savedOrder.status}`
         );
         setSaving(false);
         return;
       }
 
+      const documentsUploaded = await uploadDeliveryDocuments();
+
+      if (!documentsUploaded) {
+        setSaving(false);
+        return;
+      }
+
+      // تاریخ ذخیره شده را در همان صفحه هم نمایش بده
+      setOrder((previous: any) => ({
+        ...previous,
+        delivery_date: savedOrder.delivery_date,
+      }));
+
+      setDeliveryDate(savedOrder.delivery_date || "");
+
       alert(
-        "سفارش با موفقیت ذخیره و تأیید شد."
+        "تغییرات سفارش و مستندات تحویلی با موفقیت ذخیره شد."
       );
 
       setSelectedProductIds({});
@@ -1063,7 +1125,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
       await loadOrder();
     } catch (error) {
       console.log(
-        "APPROVE ERROR:",
+        "WAREHOUSE SAVE ERROR:",
         error
       );
       alert(
@@ -1072,6 +1134,34 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
     }
 
     setSaving(false);
+  }
+
+  async function markAsDelivered() {
+    if (saving) return;
+
+    if (!confirm("آیا این سفارش تحویل داده شده است؟")) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: "delivered" })
+        .eq("id", id);
+
+      if (error) {
+        console.log("DELIVER ERROR:", error);
+        alert(`خطا در ثبت تحویل سفارش: ${error.message}`);
+        return;
+      }
+
+      alert("وضعیت سفارش با موفقیت به «تحویل داده شد» تغییر کرد.");
+      await loadOrder();
+    } finally {
+      setSaving(false);
+    }
   }
 
   const filteredProducts = products.filter((product) => {
@@ -1092,13 +1182,13 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
   if (loading) return <div>در حال بارگذاری...</div>;
   if (!order) return <div>سفارش پیدا نشد</div>;
 
-  const isApproved = order.status === "approved";
+  const isWarehouseActive = order.status === "approved" || order.status === "delivered";
 
   return (
     <AppShell>
       <PageHeader
-        title={`جزئیات سفارش ${order.order_number || ""}`}
-        subtitle="مشاهده و مدیریت کامل سفارش"
+        title={`انبار - سفارش ${order.order_number || ""}`}
+        subtitle="مدیریت، ویرایش و تحویل سفارش در انبار"
       />
 
       <div className="panel">
@@ -1114,52 +1204,33 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           <div><strong>مشتری:</strong><br />{order.customers?.name || "-"}</div>
           <div><strong>ویزیتور:</strong><br />{order.customers?.visitor || "-"}</div>
           <div><strong>وضعیت:</strong><br />{order.status === "approved" ? "تأیید شده" : order.status}</div>
-          <div>
-            <strong>تاریخ ثبت سفارش:</strong><br />
-            {toJalaliDate(order.created_at)}
-          </div>
+          <div><strong>تاریخ ثبت:</strong><br />{new Date(order.created_at).toLocaleDateString("fa-IR")}</div>
+          {isEditing && (
+            <div>
+              <strong>تاریخ تحویل:</strong><br />
+              <DatePicker
+                calendar={persian}
+                locale={persian_fa}
+                format="YYYY/MM/DD"
+                value={deliveryDate}
+                onChange={(date: any) => {
+                  const formatted = formatDeliveryDate(date);
+                  setDeliveryDate(formatted || "");
+                }}
+                calendarPosition="bottom-right"
+                inputClass="input"
+                editable={false}
+                placeholder="انتخاب تاریخ تحویل"
+              />
+            </div>
+          )}
 
-          <div>
-            <strong>تاریخ ارسال سفارش:</strong><br />
-
-            {isEditing ? (
-              <div style={{ position: "relative", marginTop: 8 }}>
-                <DatePicker
-                  value={sendDate}
-                  calendar={persian}
-                  locale={persian_fa}
-                  calendarPosition="bottom-right"
-                  format="YYYY/MM/DD"
-                  onChange={(date:any)=>{
-                    if(date){
-                      setSendDate(
-                        `${date.year}/${String(date.month.number).padStart(2,"0")}/${String(date.day).padStart(2,"0")}`
-                      );
-                    }
-                  }}
-                  render={(value, openCalendar)=>(
-                    <button
-                      type="button"
-                      className="input"
-                      onClick={openCalendar}
-                      style={{
-                        width:"100%",
-                        direction:"rtl",
-                        textAlign:"right",
-                        cursor:"pointer",
-                        background:"#fff"
-                      }}
-                    >
-                      {sendDate || "انتخاب تاریخ ارسال"}
-                    </button>
-                  )}
-                />
-              </div>
-            ) : (
-              toJalaliDate(order.send_date)
-            )}
-
-          </div>
+          {!isEditing && order.delivery_date && (
+            <div>
+              <strong>تاریخ تحویل:</strong><br />
+              {formatPersianDate(order.delivery_date)}
+            </div>
+          )}
         </div>
 
         <hr style={{ margin: "30px 0" }} />
@@ -1167,18 +1238,24 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
           {!isEditing && (
             <button className="btn btn-primary" onClick={startEditing}>
-              ✏️ {isApproved ? "اصلاح سفارش" : "ویرایش سفارش"}
+              ✏️ ویرایش تحویل سفارش
+            </button>
+          )}
+
+          {order.status === "approved" && !isEditing && (
+            <button
+              className="btn btn-primary"
+              onClick={markAsDelivered}
+              disabled={saving}
+            >
+              🚚 تحویل داده شد
             </button>
           )}
 
           {isEditing && (
             <>
-              <button className="btn btn-primary" onClick={openAddProduct}>
-                ➕ افزودن کالای جدید
-              </button>
-
-              <button className="btn btn-primary" onClick={approveOrder} disabled={saving}>
-                {saving ? "در حال ثبت..." : "✅ ثبت و تأیید سفارش"}
+              <button className="btn btn-primary" onClick={saveWarehouseChanges} disabled={saving}>
+                {saving ? "در حال ثبت..." : "✅ ذخیره تغییرات"}
               </button>
 
               <button className="btn btn-secondary" onClick={cancelEditing} disabled={saving}>
@@ -1188,11 +1265,77 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           )}
         </div>
 
+        {/* مستندات تحویلی */}
+        <div
+          style={{
+            marginBottom: 20,
+            padding: 14,
+            borderRadius: 10,
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <input
+              id="delivery-documents-input"
+              type="file"
+              accept="application/pdf,image/*"
+              multiple
+              onChange={handleDeliveryFilesChange}
+              style={{ display: "none" }}
+            />
+
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => document.getElementById("delivery-documents-input")?.click()}
+              disabled={saving}
+            >
+              📎 مستندات تحویلی
+            </button>
+
+            {selectedDeliveryFiles.length > 0 && (
+              <span style={{ fontSize: 13, color: "#475569" }}>
+                {selectedDeliveryFiles.length.toLocaleString("fa-IR")} فایل آماده ذخیره است.
+              </span>
+            )}
+          </div>
+
+          {(deliveryDocuments.length > 0 || selectedDeliveryFiles.length > 0) && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
+              {deliveryDocuments.map((file) => (
+                <button
+                  key={file.path}
+                  type="button"
+                  onClick={() => openDeliveryDocument(file.path)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    textAlign: "right",
+                    cursor: "pointer",
+                    color: "#2563eb",
+                    fontWeight: 700,
+                  }}
+                >
+                  📄 {file.name}
+                </button>
+              ))}
+
+              {selectedDeliveryFiles.map((file, index) => (
+                <div key={`${file.name}-${index}`} style={{ color: "#64748b", fontSize: 13 }}>
+                  ⏳ {file.name} — پس از «ذخیره تغییرات» آپلود می‌شود.
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {isEditing && (
           <div style={{ marginBottom: 20, padding: 12, borderRadius: 8, background: "#fff8e1", border: "1px solid #f0d98c" }}>
             <strong>حالت ویرایش فعال است</strong>
             <div style={{ marginTop: 5, fontSize: 14 }}>
-              می‌توانید تعداد کارتن را تغییر دهید یا کالای جدید به سفارش اضافه کنید.
+              می‌توانید تاریخ تحویل، تعداد تحویلی و مقادیر مربوط به تحویل سفارش را اصلاح کنید.
             </div>
           </div>
         )}
@@ -1655,6 +1798,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>گروه کالا</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد اولیه سفارش (کارتن)</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد نهایی سفارش (کارتن)</th>
+                <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد تحویلی (کارتن)</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد جزء</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>قیمت مصرف کننده</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تخفیف</th>
@@ -1763,102 +1907,72 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
                         </span>
                       </td>
 
-                      {/* فقط این ستون قابل ویرایش است */}
+                      {/* تعداد نهایی سفارش - فقط نمایشی و قفل */}
+                      <td>
+                        <span
+                          style={{
+                            fontWeight: 800,
+                          }}
+                        >
+                          {finalOrderQuantity.toLocaleString()}
+                        </span>
+                      </td>
+
+                      {/* تعداد تحویلی انبار */}
                       <td>
                         {isEditing ? (
                           <input
                             type="number"
                             min="0"
                             step="1"
-                            value={
-                              finalOrderQuantity
-                            }
-                            onChange={(e) => {
-                              const value =
-                                e.target.value;
-
-                              // صفر مجاز است.
-                              // عدد اعشاری، منفی یا غیرصحیح مجاز نیست.
-                              if (
-                                value === ""
-                              ) {
-                                setEditedItems(
-                                  (previous) =>
-                                    previous.map(
-                                      (
-                                        x: any
-                                      ) =>
-                                        x.id ===
-                                        item.id
-                                          ? {
-                                              ...x,
-                                              final_order_quantity: 0,
-                                            }
-                                          : x
-                                    )
-                                );
-                                return;
-                              }
-
-                              const number =
-                                Number(
-                                  value
-                                );
-
-                              if (
-                                !Number.isInteger(
-                                  number
-                                ) ||
-                                number < 0
-                              ) {
-                                return;
-                              }
-
-                              setEditedItems(
-                                (previous) =>
-                                  previous.map(
-                                    (x: any) =>
-                                      x.id ===
-                                      item.id
-                                        ? {
-                                            ...x,
-                                            final_order_quantity:
-                                              number,
-                                          }
-                                        : x
-                                  )
-                              );
-                            }}
+                            value={getDeliveryCartons(currentItem)}
+                            readOnly
+                            disabled
                             style={{
                               width: 95,
                               padding: 7,
                               fontWeight: 700,
-                              border:
-                                "2px solid #2563eb",
-                              background:
-                                finalOrderQuantity ===
-                                0
-                                  ? "#fff1f2"
-                                  : "#eff6ff",
+                              border: "2px solid #94a3b8",
+                              background: "#e2e8f0",
+                              cursor: "not-allowed",
                             }}
                           />
                         ) : (
-                          <span
-                            style={{
-                              fontWeight: 800,
-                            }}
-                          >
-                            {finalOrderQuantity.toLocaleString()}
+                          <span style={{ fontWeight: 800 }}>
+                            {getDeliveryCartons(currentItem).toLocaleString()}
                           </span>
                         )}
                       </td>
 
-                      {/* تعداد جزء نهایی - به صورت لایو از تعداد نهایی کارتن محاسبه می‌شود */}
+                      {/* تعداد جزء */}
                       <td>
-                        {(
-                          finalOrderQuantity *
-                          quantityPerCarton
-                        ).toLocaleString()}
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            className="input"
+                            value={
+                              currentItem.delivery_units ??
+                              getDeliveryCartons(currentItem) * quantityPerCarton
+                            }
+                            onChange={(e) => {
+                              const value = Number(e.target.value || 0);
+                              setEditedItems((previous) =>
+                                previous.map((x: any) =>
+                                  x.id === item.id
+                                    ? { ...x, delivery_units: value }
+                                    : x
+                                )
+                              );
+                            }}
+                            style={{ width: 100 }}
+                          />
+                        ) : (
+                          (
+                            currentItem.delivery_units ??
+                            getDeliveryCartons(currentItem) * quantityPerCarton
+                          ).toLocaleString()
+                        )}
                       </td>
 
                       <td>
@@ -1915,9 +2029,9 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           جمع کل سفارش: {calculateGrandTotal().toLocaleString()} ریال
         </div>
 
-        {isApproved && !isEditing && (
+        {!isEditing && (
           <div style={{ marginTop: 20, padding: 12, borderRadius: 8, background: "#e8f5e9", border: "1px solid #a5d6a7", color: "#2e7d32" }}>
-            ✅ این سفارش تأیید شده است. برای تغییر دوباره روی «اصلاح سفارش» کلیک کنید.
+            {order.status === "approved" ? "🚚 این سفارش در حال ارسال است. برای تغییر دوباره روی «ویرایش تحویل سفارش» کلیک کنید." : "✅ این سفارش تحویل داده شده است. برای اصلاح اطلاعات تحویل می‌توانید روی «ویرایش تحویل سفارش» کلیک کنید."}
           </div>
         )}
 

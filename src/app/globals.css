@@ -1413,3 +1413,14 @@ tbody tr:last-child td {
       13px;
   }
 }
+
+.order-row-pending td { background: #fffbeb; }
+.order-row-approved td { background: #fff7ed; }
+.order-row-delivered td { background: #f0fdf4; }
+.warehouse-approved-row {
+  background: #fed7aa !important;
+}
+
+.warehouse-delivered-row {
+  background: #dcfce7 !important;
+}

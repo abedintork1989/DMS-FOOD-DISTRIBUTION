@@ -1,7 +1,7 @@
 "use client";
 import BackButton from "@/components/BackButton";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Trash2,
   Upload,
@@ -73,12 +73,15 @@ export default function CustomerDetailPage(){
 
 
 const params = useParams();
+const router = useRouter();
 
 
 const customerId =
  typeof params.id === "string"
  ? params.id
  : "";
+
+const isNewCustomer = customerId === "new";
 
 
 
@@ -151,6 +154,28 @@ useEffect(()=>{
 
 if(!customerId)
 return;
+
+
+if(isNewCustomer){
+
+ setEdit(true);
+ setLoading(false);
+
+ setForm({
+  name:"",
+  owner_name:"",
+  phone:"",
+  address:"",
+  province:"",
+  responsible:"",
+  visitor:"",
+  entry_fee:0,
+  notes:""
+ });
+
+ return;
+
+}
 
 
 loadCustomer();
@@ -347,6 +372,41 @@ return new Intl.NumberFormat("fa-IR")
 async function saveCustomer(){
 
 
+if(isNewCustomer){
+
+const {data,error}=await supabase
+.from("customers")
+.insert({
+ name:form.name,
+ owner_name:form.owner_name || null,
+ phone:form.phone || null,
+ address:form.address || null,
+ province:form.province || null,
+ responsible:form.responsible || null,
+ visitor:form.visitor || null,
+ entry_fee:Number(form.entry_fee) || 0,
+ notes:form.notes || null,
+ active:true
+})
+.select()
+.single();
+
+
+if(error){
+ alert("خطا در ثبت مشتری:\\n"+error.message);
+ return;
+}
+
+
+if(data?.id){
+ router.push(`/customers/${data.id}`);
+}
+
+return;
+
+}
+
+
 const {error}=await supabase
 
 .from("customers")
@@ -513,93 +573,128 @@ e:React.ChangeEvent<HTMLInputElement>,
 type:string
 ){
 
+  const file = e.target.files?.[0];
+
+  if(!file)
+    return;
 
 
-const file =
-e.target.files?.[0];
+  // جلوگیری از آپلود قبل از ساخته شدن مشتری
+  if(isNewCustomer || !customerId){
+    alert("ابتدا مشتری را ذخیره کنید، سپس قرارداد یا تصویر را آپلود کنید.");
+    return;
+  }
+
+
+  // بررسی نوع فایل
+  if(type === "contract"){
+
+    const allowed = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/jpg"
+    ];
+
+    if(!allowed.includes(file.type)){
+      alert("فقط فایل PDF یا تصویر قابل آپلود است.");
+      return;
+    }
+
+  }
+
+
+  // محدودیت حجم 10 مگابایت
+  const maxSize = 10 * 1024 * 1024;
+
+  if(file.size > maxSize){
+    alert("حجم فایل نباید بیشتر از 10 مگابایت باشد.");
+    return;
+  }
+
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g,"_");
+
+  const fileName =
+    `${customerId}-${Date.now()}-${safeName}`;
+
+
+  const {error:uploadError}=await supabase
+    .storage
+    .from("customer-media")
+    .upload(
+      fileName,
+      file,
+      {
+        contentType:file.type,
+        upsert:false
+      }
+    );
+
+
+  if(uploadError){
+
+    console.error(uploadError);
+
+    alert(
+      "خطا در آپلود فایل:\n"+
+      uploadError.message
+    );
+
+    return;
+
+  }
+
+
+  const {data:urlData}=
+
+    supabase
+    .storage
+    .from("customer-media")
+    .getPublicUrl(fileName);
+
+
+  const publicUrl = urlData.publicUrl;
+
+
+  const {error}=await supabase
+
+    .from("customer_media")
+
+    .insert({
+
+      customer_id:customerId,
+
+      media_type:type === "image" ? "store_image" : "contract",
+
+      image_url:publicUrl
+
+    });
 
 
 
-if(!file)
-return;
+  if(error){
+
+    // اگر ثبت دیتابیس شکست خورد، فایل Storage باقی نمی‌ماند
+    await supabase
+      .storage
+      .from("customer-media")
+      .remove([fileName]);
 
 
+    alert(
+      "خطا در ثبت اطلاعات فایل:\n"+
+      error.message
+    );
 
-const fileName =
-`${customerId}-${Date.now()}-${file.name}`;
+    return;
 
-
-
-const {error:uploadError}=await supabase
-
-.storage
-
-.from("customer-media")
-
-.upload(
-fileName,
-file
-);
+  }
 
 
+  alert("فایل با موفقیت آپلود شد");
 
-if(uploadError){
-
-alert(
-"خطا در آپلود فایل:\n"+
-uploadError.message
-);
-
-return;
-
-}
-
-
-
-const {data:urlData}=
-
-supabase
-
-.storage
-
-.from("customer-media")
-
-.getPublicUrl(fileName);
-
-
-
-const publicUrl =
-urlData.publicUrl;
-
-
-
-const {error}=await supabase
-
-.from("customer_media")
-
-.insert({
-
-customer_id:customerId,
-
-media_type:type,
-
-image_url:publicUrl
-
-});
-
-
-
-if(error){
-
-alert(error.message);
-
-return;
-
-}
-
-
-
-loadMedia();
+  loadMedia();
 
 
 }

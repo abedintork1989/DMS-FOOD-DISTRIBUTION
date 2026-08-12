@@ -15,11 +15,13 @@ import {
 
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
+import DataTable, { DataTableColumn } from "@/components/DataTable/DataTable";
 import { supabase } from "@/lib/supabase";
 
 type Customer = {
   id: string;
   name: string;
+  province?: string | null;
   visitor?: string | null;
 };
 
@@ -43,19 +45,20 @@ type OrderItem = {
   id?: string;
   product_id?: string;
   quantity?: number;
+
   productId?: string;
   productName?: string;
   barcode?: string;
   category?: string;
+
   cartonSize?: number;
+  orderCartons?: number;
+  orderUnits?: number;
   totalUnits?: number;
-  order_cartons?: number;
-order_units?: number;
-consumer_price?: number;
-discount_percent?: number;
-final_purchase_price?: number;
- 
-  
+
+  consumerPrice?: number;
+  discountPercent?: number;
+  finalPurchasePrice?: number;
 
   total?: number;
 
@@ -69,15 +72,19 @@ final_purchase_price?: number;
 
 type Order = {
   id: string;
+  order_number?: string | number | null;
   customer_id: string;
   customer_name?: string;
   visitor?: string | null;
   status: string;
   invoice_total?: number;
   created_at: string;
+  send_date?: string | null;
+  delivery_date?: string | null;
 
   customers?: {
     name: string;
+    province?: string | null;
     visitor: string | null;
   };
 
@@ -199,7 +206,7 @@ export default function OrdersPage() {
       emptyQuantities
     );
 
-const router = useRouter();
+  const router = useRouter();
 
   /* ------------------------------------------------ */
   /* دریافت اطلاعات اولیه */
@@ -224,7 +231,7 @@ const router = useRouter();
   async function loadCustomers() {
     const { data, error } = await supabase
       .from("customers")
-      .select("id,name,visitor")
+      .select("id,name,province,visitor")
       .order("name", { ascending: true });
 
     if (error) {
@@ -269,6 +276,7 @@ const router = useRouter();
   *,
   customers(
     name,
+    province,
     visitor
   ),
   order_items(
@@ -441,19 +449,19 @@ setOrders((data || []) as Order[]);
         totalUnits * finalPurchasePrice;
 
       result.push({
-  productId: product.id,
-  productName: product.name,
-  barcode: product.barcode || "-",
-  category: product.category || "-",
-  cartonSize,
-  order_cartons: cartons,
-  order_units: units,
-  totalUnits,
-  consumer_price: consumerPrice,
-  discount_percent: discountPercent,
-  final_purchase_price: finalPurchasePrice,
-  total,
-});
+        productId: product.id,
+        productName: product.name,
+        barcode: product.barcode || "-",
+        category: product.category || "-",
+        cartonSize,
+        orderCartons: cartons,
+        orderUnits: units,
+        totalUnits,
+        consumerPrice,
+        discountPercent,
+        finalPurchasePrice,
+        total,
+      });
     }
 
     return result;
@@ -575,18 +583,18 @@ setOrders((data || []) as Order[]);
 
         carton_size: item.cartonSize,
 
-        order_cartons: item.order_cartons,
+        order_cartons: item.orderCartons,
 
-        order_units: item.order_units,
+        order_units: item.orderUnits,
 
         total_units: item.totalUnits,
 
-        consumer_price:item.consumer_price,
+        consumer_price: item.consumerPrice,
 
-        discount_percent: item.discount_percent,
+        discount_percent: item.discountPercent,
 
         final_purchase_price:
-          item.final_purchase_price,
+          item.finalPurchasePrice,
 
         total: item.total,
       }));
@@ -702,13 +710,175 @@ setOrders((data || []) as Order[]);
 
     await loadOrders();
   }
+  /* ------------------------------------------------ */
+  /* ستون‌های جدول سفارشات با فیلتر و مرتب‌سازی */
+  /* ------------------------------------------------ */
+
+  function orderRowClass(row: Order) {
+    switch (row.status) {
+      case "pending":
+        return "order-row-pending";
+      case "approved":
+        return "order-row-approved";
+      case "delivered":
+        return "order-row-delivered";
+      default:
+        return "";
+    }
+  }
+
+  const orderTableColumns: DataTableColumn<Order>[] = [
+    {
+      key: "order_number",
+      title: "کد سفارش",
+      width: 90,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.order_number || "-",
+      render: (value) => (
+        <strong>{String(value ?? "-")}</strong>
+      ),
+    },
+    {
+      key: "customer",
+      title: "مشتری",
+      width: 90,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.customers?.name || row.customer_name || "-",
+    },
+    {
+      key: "province",
+      title: "استان",
+      width: 85,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.customers?.province || "-",
+    },
+    {
+      key: "visitor",
+      title: "ویزیتور",
+      width: 100,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.customers?.visitor || row.visitor || "-",
+    },
+    {
+      key: "created_at",
+      title: "تاریخ ثبت سفارش",
+      width: 100,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => formatDate(row.created_at),
+    },
+    {
+      key: "send_date",
+      title: "تاریخ ارسال سفارش",
+      width: 110,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.send_date ? formatDate(row.send_date) : "-",
+    },
+    {
+      key: "invoice_total",
+      title: "مبلغ کل",
+      width: 90,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      type: "number",
+      accessor: (row) => Number(row.invoice_total || 0),
+      render: (value) => (
+        <strong>{money(Number(value || 0))}</strong>
+      ),
+    },
+    {
+      key: "status",
+      title: "وضعیت",
+      width: 100,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => statusInfo(row.status).label,
+      render: (_value, row) => {
+        const status = statusInfo(row.status);
+
+        return (
+          <span className={`badge ${status.className}`}>
+            {status.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: "actions",
+      title: "عملیات",
+      width: 90,
+      filterable: false,
+      searchable: false,
+      sortable: false,
+      accessor: () => "",
+      render: (_value, row) => (
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => router.push(`/orders/${row.id}`)}
+        >
+          <Eye size={15} />
+          مشاهده
+        </button>
+      ),
+    },
+  ];
+
+
 
   /* ------------------------------------------------ */
   /* Render */
 /* ------------------------------------------------ */
 
   return (
-    <AppShell>
+    <>
+      <style jsx global>{`
+        .orders-page-compact table {
+          width: 100% !important;
+          table-layout: fixed !important;
+        }
+
+        .orders-page-compact th,
+        .orders-page-compact td {
+          padding: 8px 6px !important;
+          font-size: 13px !important;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .orders-page-compact .table-wrap {
+          width: 100% !important;
+          overflow-x: hidden !important;
+        }
+
+        .order-row-pending td {
+          background: #fffbe8 !important;
+        }
+        .order-row-approved td {
+          background: #fed7aa !important;
+        }
+        .order-row-delivered td {
+          background: #dcfce7 !important;
+        }
+        .order-row-approved:hover td {
+          background: #fdba74 !important;
+        }
+      `}</style>
+      <AppShell>
       <PageHeader
         title="سفارشات"
         subtitle="ثبت، بررسی و مدیریت سفارش مشتریان"
@@ -726,126 +896,36 @@ setOrders((data || []) as Order[]);
 
       {/* لیست سفارشات */}
 
-      <div className="panel">
-        <div className="table-wrap">
-          {loading ? (
-            <div
-              style={{
-                padding: 40,
-                textAlign: "center",
-              }}
-            >
-              در حال دریافت سفارشات...
-            </div>
-          ) : orders.length === 0 ? (
-            <div
-              style={{
-                padding: 40,
-                textAlign: "center",
-                color: "#64748b",
-              }}
-            >
-              هنوز سفارشی ثبت نشده است.
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                
-                  <th>مشتری</th>
-                  <th>ویزیتور</th>
-                  <th>تاریخ</th>
-                  <th>مبلغ کل</th>
-                  <th>وضعیت</th>
-                  <th>عملیات</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {orders.map((order) => {
-                  const status =
-                    statusInfo(order.status);
-
-                  return (
-                    <tr key={order.id}>
-                      
-
-                      <td>
-                       {order.customers?.name || "-"}
-                      </td>
-
-                      <td>
-                        {order.customers?.visitor || "-"}
-                      </td>
-
-                      <td>
-                        {formatDate(
-                          order.created_at
-                        )}
-                      </td>
-
-                      <td>
-                        <strong>
-                          {money(order.invoice_total || 0)}
-                        </strong>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`badge ${status.className}`}
-                        >
-                          {status.label}
-                        </span>
-                      </td>
-
-                      <td>
-                        <button
-  className="btn btn-secondary btn-small"
-  onClick={async () => {
-
-    const { data, error } = await supabase
-      .from("orders")
-      .select(`
-        *,
-        customers(
-          name,
-          visitor
-        ),
-        order_items(
-          *,
-          products(
-            name,
-            barcode,
-            category,
-            quantity_per_carton
-          )
-        )
-      `)
-      .eq("id", order.id)
-      .single();
-
-
-    if (error) {
-      console.log(error);
-      alert(error.message);
-      return;
-    }
-
-router.push(`/orders/${order.id}`);
-
-  }}
->
-  <Eye size={15} />
-  مشاهده
-</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
+      <div className="panel orders-page-compact">
+        {loading ? (
+          <div
+            style={{
+              padding: 40,
+              textAlign: "center",
+            }}
+          >
+            در حال دریافت سفارشات...
+          </div>
+        ) : orders.length === 0 ? (
+          <div
+            style={{
+              padding: 40,
+              textAlign: "center",
+              color: "#64748b",
+            }}
+          >
+            هنوز سفارشی ثبت نشده است.
+          </div>
+        ) : (
+          <DataTable
+            data={orders}
+            columns={orderTableColumns}
+            rowKey={(order) => order.id}
+            rowClassName={orderRowClass}
+            pageSize={0}
+            emptyText="سفارشی پیدا نشد."
+          />
+        )}
       </div>
 
       {/* ------------------------------------------------ */}
@@ -1459,7 +1539,7 @@ router.push(`/orders/${order.id}`);
                     <th>جمع</th>
                   </tr>
                 </thead>
-console.log("ITEMS INSIDE TABLE:", detail.order_items);
+
                 <tbody>
                   {(detail.order_items ||
                     []).map(
@@ -1489,25 +1569,31 @@ console.log("ITEMS INSIDE TABLE:", detail.order_items);
                         </td>
 
                         <td>
-                         {toPersianDigits(item.order_cartons || 0)}
+                          {toPersianDigits(item.orderCartons || 0)}
                         </td>
 
                         <td>
-                         {toPersianDigits(item.order_units || 0)}
+                          {toPersianDigits(item.orderUnits || 0)}
                         </td>
 
                         <td>
-                          {money(item.consumer_price)}
+                          {money(
+                            item.consumerPrice
+                          )}
                         </td>
 
                         <td>
-                          {toPersianDigits(item.discount_percent || 0)}
+                          {toPersianDigits(
+                            item.discountPercent|| 0
+                          )}
                           ٪
                         </td>
 
                         <td>
                           <strong>
-                            {money(item.final_purchase_price)}
+                            {money(
+                              item.finalPurchasePrice
+                            )}
                           </strong>
                         </td>
 
@@ -1656,5 +1742,6 @@ console.log("ITEMS INSIDE TABLE:", detail.order_items);
         </div>
       )}
     </AppShell>
+    </>
   );
 }
