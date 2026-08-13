@@ -1,22 +1,162 @@
 "use client";
 
+
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
 import { getCustomers, getOrders } from "@/lib/storage";
 import { money } from "@/lib/format";
 
-export default function ReportsPage(){
-  const [rows,setRows]=useState<{name:string;orders:number;sales:number}[]>([]);
-  useEffect(()=>{
-    const orders=getOrders();
-    const customers=getCustomers();
-    setRows(customers.map(c=>({name:c.name,orders:orders.filter(o=>o.customerId===c.id).length,sales:orders.filter(o=>o.customerId===c.id&&o.status!=="cancelled").reduce((s,o)=>s+o.total,0)})));
-  },[]);
-  return <AppShell>
-    <PageHeader title="گزارش‌ها" subtitle="گزارش فروش بر اساس مشتری"/>
-    <div className="panel table-wrap">
-      <table><thead><tr><th>مشتری</th><th>تعداد سفارش</th><th>فروش</th></tr></thead><tbody>{rows.map(r=><tr key={r.name}><td>{r.name}</td><td>{r.orders}</td><td>{money(r.sales)}</td></tr>)}</tbody></table>
-    </div>
-  </AppShell>
+
+type ReportRow = {
+  name: string;
+  orders: number;
+  sales: number;
+};
+
+
+export default function ReportsPage() {
+
+  const [rows, setRows] = useState<ReportRow[]>([]);
+
+
+  useEffect(() => {
+
+    const orders = getOrders();
+    const customers = getCustomers();
+
+
+    const report = customers.map((customer) => {
+
+
+      const customerOrders = orders.filter(
+        (order) =>
+          order.customer_id === customer.id
+      );
+
+
+      const sales = customerOrders
+        .filter(
+          (order) =>
+            order.status !== "cancelled"
+        )
+        .reduce(
+          (sum, order) => {
+
+            const item = order as any;
+
+
+            return (
+              sum +
+              Number(
+                item.invoice_total ??
+                item.final_cost ??
+                item.total ??
+                0
+              )
+            );
+
+          },
+          0
+        );
+
+
+      return {
+
+        name: customer.name,
+
+        orders:
+          customerOrders.length,
+
+        sales
+
+      };
+
+
+    });
+
+
+    setRows(report);
+
+
+  }, []);
+
+
+
+  return (
+
+    <AppShell>
+
+      <PageHeader
+        title="گزارش‌ها"
+        subtitle="گزارش فروش بر اساس مشتری"
+      />
+
+
+      <div className="panel table-wrap">
+
+        <table>
+
+          <thead>
+
+            <tr>
+
+              <th>
+                مشتری
+              </th>
+
+              <th>
+                تعداد سفارش
+              </th>
+
+              <th>
+                فروش
+              </th>
+
+            </tr>
+
+          </thead>
+
+
+          <tbody>
+
+            {
+              rows.map((row)=>(
+
+                <tr key={row.name}>
+
+                  <td>
+                    {row.name}
+                  </td>
+
+
+                  <td>
+                    {row.orders.toLocaleString("fa-IR")}
+                  </td>
+
+
+                  <td>
+                    {money(row.sales)}
+                  </td>
+
+
+                </tr>
+
+              ))
+            }
+
+
+          </tbody>
+
+
+        </table>
+
+
+      </div>
+
+
+    </AppShell>
+
+  );
+
 }
