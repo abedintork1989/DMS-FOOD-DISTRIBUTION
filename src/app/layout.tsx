@@ -1,10 +1,6 @@
-
-import DesktopViewport from "@/components/DesktopViewport";
-
 import type { Metadata, Viewport } from "next";
 import { Vazirmatn } from "next/font/google";
 import "./globals.css";
-
 
 const vazirmatn = Vazirmatn({
   subsets: ["arabic"],
@@ -18,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width: 1280,
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
@@ -35,11 +31,7 @@ export default function RootLayout({
       dir="rtl"
       className={vazirmatn.variable}
     >
-      <body>
-  <DesktopViewport baseWidth={1280}>
-    {children}
-  </DesktopViewport>
-</body>
+      <body>{children}</body>
     </html>
   );
 }
