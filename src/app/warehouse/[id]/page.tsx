@@ -3,6 +3,7 @@
 
 import { useEffect, useState, type ChangeEvent } from "react";
 import DatePicker from "react-multi-date-picker";
+import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { supabase } from "@/lib/supabase";
@@ -19,6 +20,16 @@ type Product = {
   quantity_per_carton?: number | null;
   consumer_price?: number | null;
 };
+
+// تاریخ امروز به شمسی با فرمت YYYY/MM/DD (همان فرمتی که در دیتابیس ذخیره می‌شود)
+// این تابع فقط برای نمایش/مقداردهی پیش‌فرض استفاده می‌شود؛ چیزی را در دیتابیس ذخیره نمی‌کند.
+function getTodayJalaliString() {
+  const today = new DateObject({ calendar: persian, locale: persian_fa });
+  const yyyy = String(today.year);
+  const mm = String(today.month.number).padStart(2, "0");
+  const dd = String(today.day).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd}`;
+}
 
 export default function OrderDetailPage() {
   const params = useParams();
@@ -156,8 +167,10 @@ export default function OrderDetailPage() {
       const finalData = { ...orderData, order_items: items || [] };
       setOrder(finalData);
 
-      // مقدار تاریخ ذخیره شده را برای نمایش مجدد در DatePicker برمی‌گردانیم
-      setDeliveryDate(orderData.delivery_date || "");
+      // مقدار تاریخ ذخیره شده را برای نمایش مجدد در DatePicker برمی‌گردانیم.
+      // اگر سفارش هنوز تاریخ تحویلی ندارد، پیش‌فرض روی تاریخ امروز قرار می‌گیرد
+      // (فقط برای نمایش؛ تا زمانی که «ذخیره تغییرات» زده نشود چیزی در دیتابیس ثبت نمی‌شود).
+      setDeliveryDate(orderData.delivery_date || getTodayJalaliString());
 
       setEditedItems(finalData.order_items || []);
       await loadDeliveryDocuments();
@@ -391,6 +404,12 @@ export default function OrderDetailPage() {
 
     setEditedItems(itemsWithDeliveryDefault);
     setIsEditing(true);
+
+    // اگر تاریخ تحویل هنوز ثبت نشده، به‌صورت پیش‌فرض روی امروز قرار می‌گیرد
+    // تا مسئول انبار مجبور به انتخاب دستی تاریخ امروز نباشد.
+    if (!deliveryDate) {
+      setDeliveryDate(getTodayJalaliString());
+    }
   }
 
   function cancelEditing() {
@@ -399,6 +418,8 @@ export default function OrderDetailPage() {
     setShowAddProduct(false);
     setSelectedProductIds({});
     setPendingCartons({});
+    // در صورت لغو ویرایش، تاریخ نمایشی به آخرین مقدار ذخیره‌شده (یا امروز) برمی‌گردد.
+    setDeliveryDate(order.delivery_date || getTodayJalaliString());
   }
 
   function openAddProduct() {
@@ -1038,13 +1059,18 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           0
         );
 
+      // تاریخ تحویل: اگر کاربر چیزی انتخاب نکرده، همان تاریخ امروز (که به‌صورت
+      // پیش‌فرض در فیلد قرار گرفته) به‌عنوان مقدار نهایی ذخیره می‌شود.
+      const deliveryDateToSave =
+        deliveryDate || getTodayJalaliString();
+
       const { error: orderUpdateError } =
         await supabase
           .from("orders")
           .update({
             status: order.status,
             invoice_total: grandTotal,
-             delivery_date: deliveryDate ? deliveryDate : null,
+            delivery_date: deliveryDateToSave,
           })
           .eq("id", id);
 
@@ -1111,7 +1137,7 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
         delivery_date: savedOrder.delivery_date,
       }));
 
-      setDeliveryDate(savedOrder.delivery_date || "");
+      setDeliveryDate(savedOrder.delivery_date || getTodayJalaliString());
 
       alert(
         "تغییرات سفارش و مستندات تحویلی با موفقیت ذخیره شد."
@@ -1225,10 +1251,12 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
             </div>
           )}
 
-          {!isEditing && order.delivery_date && (
+          {!isEditing && (
             <div>
               <strong>تاریخ تحویل:</strong><br />
-              {formatPersianDate(order.delivery_date)}
+              {/* اگر تاریخ تحویل هنوز ثبت نشده، تا زمان ویرایش و ثبت واقعی
+                  تاریخ امروز به‌صورت پیش‌فرض نمایش داده می‌شود. */}
+              {formatPersianDate(order.delivery_date || getTodayJalaliString())}
             </div>
           )}
         </div>

@@ -3,8 +3,8 @@
   --surface: #ffffff;
   --surface-soft: #f8fafc;
 
-  --primary: #0f172a;
-  --primary-2: #1e293b;
+  --primary: #15803d;
+  --primary-2: #064e3b;
 
   --text: #0f172a;
   --muted: #64748b;
@@ -100,13 +100,10 @@ video {
 }
 
 .main-with-sidebar {
-  width: calc(100% - 270px);
-
-  margin-right: 270px;
-
-  min-height: 100vh;
-
-  overflow-x: hidden;
+  width:100%;
+  margin-right:0;
+  min-height:100vh;
+  overflow-x:hidden;
 }
 
 .page-content {
@@ -120,11 +117,118 @@ video {
   overflow-x: hidden;
 }
 
+
+
+/* =========================================================
+   MODERN TOP NAVIGATION - DMS GREEN THEME
+========================================================= */
+
+.top-navigation {
+  width:100%;
+  min-height:78px;
+  background:#fff;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  gap:24px;
+  padding:0 32px;
+  direction:rtl;
+  position:sticky;
+  top:0;
+  z-index:1000;
+}
+
+.brand-box {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-width:220px;
+}
+
+.brand-logo {
+  width:48px;
+  height:48px;
+  border-radius:15px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg,#15803d,#064e3b);
+  color:white;
+  font-weight:900;
+}
+
+.brand-name {
+  color:#064e3b;
+  font-weight:900;
+  font-size:17px;
+}
+
+.brand-desc {
+  color:var(--muted);
+  font-size:12px;
+}
+
+.navigation-menu {
+  flex:1;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:6px;
+  overflow-x:auto;
+}
+
+.navigation-item {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:11px 14px;
+  border-radius:13px;
+  color:#475569;
+  font-weight:700;
+  white-space:nowrap;
+  transition:.2s;
+}
+
+.navigation-item:hover {
+  background:#f0fdf4;
+  color:#15803d;
+}
+
+.navigation-item.active {
+  background:#15803d;
+  color:white;
+  box-shadow:0 8px 20px rgba(21,128,61,.22);
+}
+
+.logout-button {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  border:0;
+  background:#fee2e2;
+  color:#b91c1c;
+  padding:11px 16px;
+  border-radius:13px;
+  font-weight:800;
+}
+
+@media(max-width:900px){
+  .top-navigation{
+    flex-direction:column;
+    padding:16px;
+  }
+
+  .navigation-menu{
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+}
+
 /* =========================================================
    SIDEBAR
 ========================================================= */
 
 .sidebar {
+  display:none;
   position: fixed;
 
   top: 0;
@@ -1424,3 +1528,394 @@ tbody tr:last-child td {
 .warehouse-delivered-row {
   background: #dcfce7 !important;
 }
+
+
+/* =========================================================
+   PREMIUM DMS HEADER V2
+   Enterprise Green Dashboard Theme
+========================================================= */
+
+.premium-header {
+  width: 100%;
+  height: 86px;
+  background: #ffffff;
+  border-bottom: 1px solid #edf2f7;
+  display: flex;
+  align-items: center;
+  padding: 0 36px;
+  direction: rtl;
+  gap: 30px;
+  position: sticky;
+  top: 0;
+  z-index: 1200;
+  box-shadow: 0 5px 25px rgba(15,23,42,.05);
+}
+
+.premium-brand {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  min-width:260px;
+  flex-shrink:0;
+}
+
+.logo-shape {
+  width:52px;
+  height:52px;
+  border-radius:16px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:white;
+  font-weight:900;
+  background:linear-gradient(145deg,#22c55e,#065f46);
+  box-shadow:0 8px 22px rgba(21,128,61,.25);
+}
+
+.brand-text {
+  display:flex;
+  flex-direction:column;
+}
+
+.brand-title {
+  font-size:18px;
+  font-weight:900;
+  color:#064e3b;
+}
+
+.brand-subtitle {
+  font-size:11px;
+  color:#94a3b8;
+  margin-top:3px;
+}
+
+
+.premium-menu {
+  flex:1;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  overflow:hidden;
+}
+
+.premium-menu-item {
+  height:46px;
+  padding:0 16px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  border-radius:14px;
+  color:#475569;
+  font-size:13px;
+  font-weight:700;
+  transition:.25s;
+  white-space:nowrap;
+}
+
+.premium-menu-item:hover {
+  background:#f0fdf4;
+  color:#15803d;
+}
+
+.premium-menu-item.active {
+  background:#ecfdf5;
+  color:#15803d;
+  border:1px solid #bbf7d0;
+}
+
+.premium-menu-item.active svg {
+  color:#15803d;
+}
+
+
+.user-area {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-width:310px;
+  justify-content:flex-start;
+  flex-shrink:0;
+}
+
+.header-icon {
+  position:relative;
+  width:38px;
+  height:38px;
+  border-radius:12px;
+  border:1px solid #e2e8f0;
+  background:white;
+  color:#64748b;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.header-icon:hover {
+  background:#f0fdf4;
+  color:#15803d;
+}
+
+.notification-dot {
+  position:absolute;
+  width:8px;
+  height:8px;
+  top:6px;
+  right:6px;
+  background:#16a34a;
+  border:2px solid white;
+  border-radius:50%;
+}
+
+
+.profile-box {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:7px 12px;
+  border-radius:16px;
+  background:#f8fafc;
+}
+
+.profile-box svg {
+  color:#15803d;
+}
+
+.profile-name {
+  font-size:13px;
+  font-weight:900;
+  color:#0f172a;
+}
+
+.profile-role {
+  font-size:11px;
+  color:#64748b;
+  margin-top:3px;
+}
+
+.profile-logout {
+  width:38px;
+  height:38px;
+  border:0;
+  border-radius:12px;
+  background:#fee2e2;
+  color:#dc2626;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+
+@media(max-width:1200px){
+
+.premium-header{
+  padding:0 20px;
+}
+
+.premium-menu{
+  overflow-x:auto;
+  justify-content:flex-start;
+}
+
+}
+
+
+@media(max-width:900px){
+
+.premium-header{
+  height:auto;
+  flex-direction:column;
+  padding:18px;
+}
+
+.premium-menu{
+  flex-wrap:wrap;
+}
+
+.user-area{
+  justify-content:center;
+}
+
+}
+
+
+
+/* =========================================================
+   DMS FINAL HEADER POLISH
+   اصلاح نهایی فضای هدر و حذف حس قدیمی
+========================================================= */
+
+.top-navigation,
+.premium-header {
+  box-shadow:0 8px 30px rgba(15,23,42,.06);
+}
+
+.premium-menu-item svg {
+  width:19px;
+  height:19px;
+  stroke-width:2;
+}
+
+.premium-menu-item span {
+  line-height:1;
+}
+
+.premium-header .brand-title {
+  letter-spacing:-.3px;
+}
+
+@media(max-width:900px){
+  .main-with-sidebar{
+    width:100%;
+    margin-right:0;
+  }
+}
+
+/* =========================================================
+   BOTANICAL LOGIN DESIGN
+========================================================= */
+.botanical-login-page {
+  --login-green: #176548;
+  --login-deep-green: #0c3f32;
+  --login-mist: #edf4ed;
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  overflow: hidden;
+  padding: 32px;
+  background: linear-gradient(135deg, #e5eee6 0%, #f7f8f3 48%, #d6e7d6 100%);
+}
+
+/* =========================================================
+   DMS PREMIUM HEADER - GROUPED NAVIGATION
+========================================================= */
+.dms-premium-header {
+  min-height: 82px;
+  height: auto;
+  padding: 12px 28px;
+  gap: 28px;
+  border-bottom: 1px solid #e8efea;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 10px 30px rgba(23, 64, 47, .07);
+  backdrop-filter: blur(12px);
+}
+
+.dms-premium-header .premium-brand { min-width: max-content; gap: 11px; }
+.dms-premium-header .logo-shape { width: 56px; height: 56px; border-radius: 19px; background: linear-gradient(145deg, #18a863, #0c6a47); box-shadow: 0 10px 22px rgba(13, 117, 75, .25); }
+.dms-premium-header .brand-title { color: #10533c; font-size: 19px; }
+.dms-premium-header .brand-subtitle { margin-top: 4px; color: #8aa198; font-size: 11px; direction: ltr; }
+
+.dms-premium-header .premium-menu { gap: 5px; overflow: visible; }
+.dms-premium-header .premium-menu-item { height: 46px; padding: 0 13px; border: 1px solid transparent; border-radius: 13px; color: #56675f; font-size: 13px; font-weight: 800; }
+.dms-premium-header .premium-menu-item:hover { color: #107246; background: #f0f8f2; }
+.dms-premium-header .premium-menu-item.active { color: #107246; border-color: #ccebd7; background: #ebf8ef; box-shadow: none; }
+.dms-premium-header .premium-menu-item svg { stroke-width: 2.1; }
+
+.menu-dropdown { position: relative; }
+.dropdown-trigger { border: 0; cursor: pointer; }
+.dropdown-chevron { margin-right: -4px; transition: transform .2s ease; }
+.menu-dropdown.open .dropdown-chevron { transform: rotate(180deg); }
+.dropdown-panel { position: absolute; z-index: 1300; top: calc(100% + 10px); right: 0; display: grid; width: 190px; padding: 8px; border: 1px solid #e4eee7; border-radius: 17px; background: rgba(255,255,255,.98); box-shadow: 0 18px 36px rgba(22, 66, 47, .14); opacity: 0; visibility: hidden; transform: translateY(-7px); transition: .18s ease; }
+.menu-dropdown.open .dropdown-panel { opacity: 1; visibility: visible; transform: translateY(0); }
+.dropdown-item { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 11px; color: #52665b; font-size: 13px; font-weight: 700; transition: .16s ease; }
+.dropdown-item:hover, .dropdown-item.active { color: #0f7045; background: #edf8f0; }
+
+.dms-premium-header .user-area { min-width: max-content; gap: 9px; }
+.dms-premium-header .header-icon { width: 42px; height: 42px; border: 1px solid #e2ebe4; border-radius: 14px; color: #60746a; box-shadow: 0 3px 10px rgba(21, 75, 48, .03); }
+.dms-premium-header .header-icon:hover { color: #0d7347; background: #eff8f1; }
+.dms-premium-header .notification-dot { top: 7px; right: 8px; width: 8px; height: 8px; background: #21af68; }
+.dms-premium-header .profile-box { padding: 7px 11px; border: 1px solid #edf2ee; border-radius: 16px; background: #f9fcfa; }
+.dms-premium-header .profile-box > svg { color: #13834f; }
+.dms-premium-header .profile-name { color: #244e3a; }
+.dms-premium-header .profile-role { color: #81958a; }
+.dms-premium-header .profile-logout { width: 42px; height: 42px; border-radius: 14px; color: #d74c4c; background: #fff0ee; }
+.dms-premium-header .profile-logout:hover { background: #fee2df; }
+
+/* =========================================================
+   DMS MANAGER DASHBOARD
+========================================================= */
+.dms-content { max-width: 1540px; padding: 24px 32px 40px; }
+.dashboard-hero { position: relative; display: flex; justify-content: space-between; align-items: flex-start; min-height: 175px; overflow: hidden; margin-bottom: 24px; padding: 34px 40px; border-radius: 23px; color: white; background: linear-gradient(115deg, #116c45 0%, #063928 68%, #02251b 100%); box-shadow: 0 18px 38px rgba(7, 79, 46, .2); }
+.dashboard-hero > div:not(.hero-orb) { position: relative; z-index: 1; }.dashboard-eyebrow { display: block; color: #b8dfc9; font-size: 12px; font-weight: 700; }.dashboard-hero h1 { margin: 11px 0 8px; font-size: 30px; }.dashboard-hero h1 span { font-size: 25px; }.dashboard-hero p { margin: 0; color: #d1e7d9; font-size: 13px; }.dashboard-date { display: grid; gap: 8px; min-width: 185px; padding: 12px 15px; border: 1px solid rgba(202,239,215,.2); border-radius: 14px; background: rgba(255,255,255,.07); }.dashboard-date span { color: #b6ddc6; font-size: 12px; }.dashboard-date strong { font-size: 13px; }.hero-orb { position: absolute; border-radius: 50%; background: rgba(106, 204, 139, .12); }.hero-orb-one { width: 280px; height: 280px; left: 20%; bottom: -205px; box-shadow: 0 0 0 55px rgba(105,205,139,.07), 0 0 0 115px rgba(105,205,139,.04); }.hero-orb-two { width: 170px; height: 170px; left: -55px; top: -60px; }
+.dashboard-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 15px; margin: -48px 16px 24px; position: relative; z-index: 2; }.dashboard-metric { display: flex; align-items: flex-start; gap: 12px; min-height: 127px; padding: 19px 16px; border: 1px solid #edf2ee; border-radius: 17px; background: rgba(255,255,255,.97); box-shadow: 0 10px 25px rgba(15, 57, 37, .1); }.metric-icon { display: grid; flex: 0 0 39px; width: 39px; height: 39px; place-items: center; border-radius: 12px; }.dashboard-metric span, .dashboard-metric small { display: block; color: #71867b; font-size: 11px; }.dashboard-metric strong { display: block; margin: 9px 0 7px; color: #183b2c; font-size: 17px; white-space: nowrap; }.metric-green .metric-icon { color: #078647; background: #e4f8eb; }.metric-amber .metric-icon { color: #c97a00; background: #fff5dc; }.metric-blue .metric-icon { color: #2676b8; background: #e6f3ff; }.metric-violet .metric-icon { color: #7858c7; background: #f0ebff; }.metric-mint .metric-icon { color: #0b836f; background: #dff8f1; }
+.dashboard-main-grid { display: grid; grid-template-columns: minmax(0, 1.38fr) minmax(310px, .82fr); gap: 18px; }.dashboard-bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }.dashboard-panel { min-width: 0; padding: 22px; border: 1px solid #edf2ee; border-radius: 18px; background: #fff; box-shadow: 0 7px 22px rgba(24, 65, 44, .06); }.dashboard-panel-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }.dashboard-panel-title span { color: #82948a; font-size: 11px; }.dashboard-panel-title h2 { margin: 5px 0 0; color: #173f2d; font-size: 17px; }.view-all { display: flex; align-items: center; gap: 5px; padding: 8px 10px; border: 1px solid #dceee1; border-radius: 10px; color: #16834d; font-size: 11px; font-weight: 800; }.view-all:hover { background: #effaf2; }.dashboard-order-table { overflow-x: auto; }.dashboard-order-table table { min-width: 620px; }.dashboard-order-table th { padding: 11px 9px; color: #82948a; background: transparent; }.dashboard-order-table td { padding: 13px 9px; color: #40584b; font-size: 12px; }.dashboard-order-table tr:last-child td { border-bottom: 0; }.order-id { color: #159052 !important; font-weight: 900; }.order-status { display: inline-flex; padding: 6px 9px; border-radius: 8px; font-size: 10px; font-weight: 800; }.order-status.pending { color: #ae6a00; background: #fff5dc; }.order-status.approved { color: #147747; background: #e6f8ec; }.order-status.delivered { color: #2476b4; background: #e8f4ff; }.order-status.cancelled { color: #c34141; background: #fff0f0; }.order-view { color: #58806b; }.order-view:hover { color: #11814a; }
+.sales-overview { overflow: hidden; }.sales-overview > .dashboard-panel-title > svg { padding: 9px; width: 40px; height: 40px; border-radius: 12px; color: #16834e; background: #e7f8ed; }.sales-total { display: grid; gap: 7px; margin-bottom: 12px; }.sales-total span { color: #778d80; font-size: 12px; }.sales-total strong { color: #108a4c; font-size: 23px; }.sales-bars { display: flex; height: 180px; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 10px 5px 0; border-bottom: 1px solid #e8f0e9; background: repeating-linear-gradient(to bottom, transparent 0, transparent 43px, #edf3ef 44px); }.sales-bar-column { display: grid; flex: 1; height: 100%; align-items: end; justify-items: center; gap: 8px; }.sales-bar-column i { display: block; width: min(26px, 100%); min-height: 10px; border-radius: 10px 10px 4px 4px; background: linear-gradient(#31ad68, #0e8047); }.sales-bar-column span { color: #82948a; font-size: 10px; }.panel-note { margin: 17px 0 0; color: #8a9c92; font-size: 11px; line-height: 1.8; }
+.quick-actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }.quick-link { position: relative; display: grid; min-height: 118px; align-content: center; justify-items: center; gap: 10px; border-radius: 14px; color: #16844c; background: linear-gradient(145deg, #f1fbf4, #e9f7ed); font-size: 11px; font-weight: 800; transition: .18s ease; }.quick-link > svg:last-child { position: absolute; top: 9px; left: 9px; color: #86b99b; }.quick-link:hover { transform: translateY(-3px); color: #086e3d; box-shadow: 0 9px 16px rgba(20,126,69,.13); }.activity-panel { min-height: 245px; }.activity-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef3ef; }.activity-item:last-child { border-bottom: 0; }.activity-icon { display: grid; flex: 0 0 35px; width: 35px; height: 35px; place-items: center; border-radius: 11px; color: #16864d; background: #e7f8ec; }.activity-item strong { display: block; color: #345243; font-size: 12px; }.activity-item p { margin: 5px 0 0; color: #87988f; font-size: 10px; }
+@media (max-width: 1200px) { .dashboard-stats { grid-template-columns: repeat(3, 1fr); margin: 18px 0; }.dashboard-main-grid { grid-template-columns: 1fr; }.sales-bars { height: 155px; } }
+@media (max-width: 760px) { .dms-content { padding: 16px 14px 30px; }.dashboard-hero { min-height: 205px; padding: 27px 22px; border-radius: 18px; }.dashboard-hero h1 { font-size: 25px; }.dashboard-date { display: none; }.dashboard-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }.dashboard-metric { min-height: 112px; padding: 14px 11px; gap: 9px; }.dashboard-metric strong { font-size: 14px; white-space: normal; }.metric-icon { flex-basis: 34px; width: 34px; height: 34px; }.dashboard-bottom-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }.dashboard-panel { padding: 17px; border-radius: 15px; }.quick-actions-grid { grid-template-columns: repeat(2, 1fr); }.quick-link { min-height: 100px; }.dashboard-order-table table { min-width: 560px; } }
+@media (max-width: 390px) { .dashboard-stats { grid-template-columns: 1fr; }.dashboard-metric { min-height: auto; }.dashboard-hero p { font-size: 12px; } }
+
+@media (max-width: 1200px) {
+  .dms-premium-header { padding: 12px 18px; gap: 16px; }
+  .dms-premium-header .premium-menu { justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; }
+  .dms-premium-header .help-icon { display: none; }
+}
+
+@media (max-width: 900px) {
+  .dms-premium-header { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+  .dms-premium-header .premium-brand { grid-column: 1; grid-row: 1; }
+  .dms-premium-header .user-area { grid-column: 2; grid-row: 1; }
+  .dms-premium-header .premium-menu { grid-column: 1 / -1; grid-row: 2; width: 100%; padding-top: 5px; }
+  .dms-premium-header .profile-box { display: none; }
+}
+
+@media (max-width: 540px) {
+  .dms-premium-header { padding: 10px 12px; }
+  .dms-premium-header .brand-text { display: none; }
+  .dms-premium-header .logo-shape { width: 48px; height: 48px; border-radius: 16px; font-size: 13px; }
+  .dms-premium-header .header-icon, .dms-premium-header .profile-logout { width: 39px; height: 39px; border-radius: 12px; }
+  .dms-premium-header .premium-menu-item { flex: 0 0 auto; height: 43px; padding: 0 11px; font-size: 12px; }
+  .dropdown-panel { position: fixed; top: auto; right: 12px; left: 12px; width: auto; }
+}
+
+.login-ambient { position: absolute; border-radius: 50%; filter: blur(12px); opacity: .58; }
+.login-ambient-one { width: 42rem; height: 42rem; top: -27rem; right: -8rem; background: #87b692; }
+.login-ambient-two { width: 34rem; height: 34rem; bottom: -24rem; left: -10rem; background: #a1c6a5; }
+
+.botanical-login-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(350px, .94fr) minmax(410px, 1.06fr);
+  width: min(1060px, 100%);
+  min-height: 650px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.8);
+  border-radius: 34px;
+  background: rgba(255,255,255,.78);
+  box-shadow: 0 30px 70px rgba(17, 62, 43, .17);
+  backdrop-filter: blur(15px);
+}
+
+.botanical-form-panel { display: flex; flex-direction: column; justify-content: center; padding: 64px 72px; background: rgba(255,255,255,.92); }
+.login-brand-mark { display: grid; width: 54px; height: 54px; place-items: center; margin-bottom: 30px; border-radius: 17px; color: white; background: linear-gradient(135deg, #27845f, #104c3a); box-shadow: 0 12px 25px rgba(20, 96, 66, .22); }
+.login-heading span { color: #48806a; font-size: 13px; font-weight: 800; }
+.login-heading h1 { margin: 9px 0 8px; color: #153f31; font-size: clamp(25px, 2.6vw, 33px); line-height: 1.3; }
+.login-heading p { margin: 0; color: #789087; direction: ltr; font-size: 13px; }
+.botanical-login-form { display: grid; gap: 20px; margin-top: 42px; }
+.botanical-field { display: grid; gap: 9px; color: #375c4e; font-size: 13px; font-weight: 800; }
+.botanical-field input { width: 100%; height: 52px; border: 1px solid #d7e2da; border-radius: 15px; outline: none; padding: 0 16px; color: #173b2e; background: #f7faf7; transition: .2s ease; }
+.botanical-field input:focus { border-color: #5eaa83; background: white; box-shadow: 0 0 0 4px rgba(43, 132, 91, .1); }
+.botanical-password { position: relative; }
+.botanical-password input { padding-left: 52px; }
+.botanical-password button { position: absolute; display: grid; width: 38px; height: 38px; place-items: center; top: 7px; left: 7px; border: 0; border-radius: 11px; color: #5e7c6e; background: transparent; }
+.botanical-password button:hover { color: var(--login-green); background: #eaf4ec; }
+.botanical-submit { height: 54px; margin-top: 8px; border: 0; border-radius: 15px; color: white; background: linear-gradient(105deg, #1d8158, #11543d); box-shadow: 0 12px 22px rgba(21, 108, 72, .24); font-weight: 900; transition: transform .2s ease, box-shadow .2s ease; }
+.botanical-submit:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 15px 27px rgba(21, 108, 72, .3); }
+.login-help { margin: 24px 0 0; color: #8a9d94; font-size: 12px; text-align: center; }
+.botanical-form-panel .login-error { padding: 11px 13px; border: 1px solid #fecaca; border-radius: 12px; color: #b91c1c; background: #fef2f2; font-size: 12px; }
+
+.login-art-panel { position: relative; overflow: hidden; padding: 62px 54px; color: white; background: radial-gradient(circle at 75% 25%, #639c79 0, transparent 30%), linear-gradient(140deg, #194e3d, #092f28 74%); }
+.art-copy { position: relative; z-index: 2; max-width: 285px; }
+.art-kicker { display: flex; align-items: center; gap: 7px; color: #bfdbc8; font-size: 13px; font-weight: 700; }
+.art-copy h2 { margin: 20px 0 14px; font-size: 31px; line-height: 1.45; }
+.art-copy p { color: #c4d7ca; font-size: 14px; line-height: 2; }
+.art-sun { position: absolute; width: 300px; height: 300px; right: -95px; bottom: -90px; border-radius: 50%; background: rgba(187, 222, 195, .12); box-shadow: 0 0 0 45px rgba(187, 222, 195, .06), 0 0 0 94px rgba(187, 222, 195, .04); }
+.leaf { position: absolute; width: 150px; height: 62px; border-radius: 100% 0 100% 0; background: linear-gradient(135deg, #80b08a, #255c46); transform-origin: bottom left; opacity: .96; box-shadow: inset 6px -6px 14px rgba(0,0,0,.15); }
+.leaf::after { content: ""; position: absolute; width: 120%; height: 2px; top: 50%; left: -9%; background: rgba(224,242,226,.45); transform: rotate(-22deg); }
+.leaf-one { right: -22px; bottom: 77px; transform: rotate(18deg); }.leaf-two { right: 36px; bottom: 5px; transform: rotate(68deg) scale(.9); }.leaf-three { right: 100px; bottom: -10px; transform: rotate(108deg) scale(.78); }.leaf-four { left: -65px; bottom: 40px; transform: rotate(-32deg) scale(.9); }.leaf-five { left: -38px; bottom: 142px; transform: rotate(17deg) scale(.76); }.leaf-six { left: 12px; bottom: -15px; transform: rotate(80deg) scale(.72); }
+
+@media (max-width: 800px) { .botanical-login-page { padding: 18px; } .botanical-login-card { grid-template-columns: 1fr; min-height: 0; max-width: 500px; } .login-art-panel { min-height: 200px; padding: 28px 30px; } .art-copy h2 { margin: 10px 0 0; font-size: 22px; } .art-copy p, .art-kicker { display: none; } .botanical-form-panel { padding: 36px 28px; } .login-brand-mark { width: 48px; height: 48px; margin-bottom: 22px; } .botanical-login-form { margin-top: 30px; } .leaf { transform-origin: bottom left; opacity: .68; } .leaf-one { right: -35px; bottom: -14px; } .leaf-two { right: 35px; bottom: -39px; } .leaf-three, .leaf-four, .leaf-five { display: none; } }
+
+@media (max-width: 420px) { .botanical-login-page { padding: 12px; } .botanical-form-panel { padding: 30px 21px; } .login-art-panel { min-height: 170px; } .login-heading h1 { font-size: 24px; } }

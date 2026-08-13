@@ -93,6 +93,23 @@ function formatDeliveryDate(value: string | null | undefined) {
   return `${toPersianDigits(Number(day))} ${months[Number(month) - 1]} ${toPersianDigits(Number(year))}`;
 }
 
+// تاریخ امروز به شمسی، با همان فرمت ذخیره‌شده در دیتابیس (YYYY/MM/DD)
+// این تابع فقط برای نمایش پیش‌فرض استفاده می‌شود؛ چیزی در دیتابیس ذخیره نمی‌کند.
+function getTodayJalaliString() {
+  const formatter = new Intl.DateTimeFormat("fa-IR-u-ca-persian-nu-latn", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+
+  return `${year}/${month}/${day}`;
+}
+
 function warehouseStatus(status: string) {
   if (status === "delivered") {
     return { label: "تحویل داده شد", className: "info" };
@@ -190,7 +207,13 @@ export default function WarehousePage() {
         filterable: true,
         searchable: true,
         sortable: true,
-        accessor: (row) => formatDeliveryDate(row.delivery_date),
+        // اگر تاریخ تحویل هنوز ثبت نشده باشد (هنوز ویرایش نخورده)،
+        // به‌صورت پیش‌فرض تاریخ امروز به شمسی نمایش داده می‌شود.
+        // به محض ثبت واقعی از صفحه ویرایش، همان مقدار ذخیره‌شده نمایش داده می‌شود.
+        accessor: (row) =>
+          row.delivery_date
+            ? formatDeliveryDate(row.delivery_date)
+            : formatDeliveryDate(getTodayJalaliString()),
       },
       {
         key: "invoice_total",

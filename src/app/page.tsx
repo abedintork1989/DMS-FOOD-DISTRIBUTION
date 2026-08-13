@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Boxes } from "lucide-react";
+import { Boxes, Eye, EyeOff, Leaf } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -19,7 +19,6 @@ const USERS: Record<string, LoginUser> = {
     role: "manager",
     name: "مدیر سیستم",
   },
-
   "A.Najari": {
     username: "A.Najari",
     email: "a.najari@local.app",
@@ -30,72 +29,40 @@ const USERS: Record<string, LoginUser> = {
 
 export default function LoginPage() {
   const router = useRouter();
-
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  async function login(e: FormEvent) {
-    e.preventDefault();
-
+  async function login(event: FormEvent) {
+    event.preventDefault();
     setError("");
 
     const cleanUsername = username.trim();
-
     if (!cleanUsername || !password) {
       setError("نام کاربری و رمز عبور را وارد کنید.");
       return;
     }
 
     const selectedUser = USERS[cleanUsername];
-
     if (!selectedUser) {
-      setError(
-        "نام کاربری اشتباه است. از A.Tork یا A.Najari استفاده کنید."
-      );
+      setError("نام کاربری اشتباه است.");
       return;
     }
 
     setLoading(true);
-
     try {
-      /*
-       * ورود واقعی به Supabase Auth
-       *
-       * کاربر همچنان فقط نام کاربری خودش را وارد می‌کند.
-       * ایمیل‌های زیر فقط شناسه داخلی Supabase Auth هستند.
-       */
-      const { data, error: loginError } =
-        await supabase.auth.signInWithPassword({
-          email: selectedUser.email,
-          password,
-        });
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({
+        email: selectedUser.email,
+        password,
+      });
 
-      if (loginError) {
-        console.error("SUPABASE LOGIN ERROR:", loginError);
-
-        setError(
-          "نام کاربری یا رمز عبور اشتباه است، یا این کاربر هنوز در Supabase ساخته نشده است."
-        );
-
+      if (loginError || !data.session || !data.user) {
+        setError("نام کاربری یا رمز عبور اشتباه است.");
         return;
       }
 
-      if (!data.session || !data.user) {
-        setError(
-          "ورود انجام شد ولی Session واقعی Supabase ساخته نشد."
-        );
-
-        return;
-      }
-
-      /*
-       * این localStorage را فعلاً نگه می‌داریم تا بخش‌های قدیمی
-       * برنامه که از dms_user استفاده می‌کنند همچنان کار کنند.
-       *
-       * امنیت و احراز هویت واقعی از اینجا به بعد با Supabase Auth است.
-       */
       localStorage.setItem(
         "dms_user",
         JSON.stringify({
@@ -106,101 +73,67 @@ export default function LoginPage() {
         })
       );
 
-      console.log("LOGIN SUCCESS:", {
-        username: selectedUser.username,
-        role: selectedUser.role,
-        supabase_user_id: data.user.id,
-      });
-
-      if (selectedUser.role === "manager") {
-        router.push("/dashboard");
-      } else {
-        router.push("/orders");
-      }
-    } catch (loginException) {
-      console.error("LOGIN EXCEPTION:", loginException);
-
-      setError(
-        "خطایی هنگام ورود رخ داد. لطفاً دوباره تلاش کنید."
-      );
+      router.push(selectedUser.role === "manager" ? "/dashboard" : "/orders");
+    } catch {
+      setError("خطایی هنگام ورود رخ داد.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
-        <div className="login-brand">
-          <div className="brand-icon">
-            <Boxes size={22} />
+    <main className="botanical-login-page">
+      <div className="login-ambient login-ambient-one" />
+      <div className="login-ambient login-ambient-two" />
+
+      <section className="botanical-login-card">
+        <aside className="login-art-panel" aria-hidden="true">
+          <div className="art-copy">
+            <span className="art-kicker"><Leaf size={16} /> مدیریت هوشمند</span>
+            <h2>همه‌چیز برای مدیریت بهتر پخش</h2>
+            <p>ساده، سریع و مطمئن؛ همراه تیم شما در هر روز کاری.</p>
+          </div>
+          <div className="art-sun" />
+          <span className="leaf leaf-one" />
+          <span className="leaf leaf-two" />
+          <span className="leaf leaf-three" />
+          <span className="leaf leaf-four" />
+          <span className="leaf leaf-five" />
+          <span className="leaf leaf-six" />
+        </aside>
+
+        <div className="botanical-form-panel">
+          <div className="login-brand-mark"><Boxes size={28} /></div>
+          <div className="login-heading">
+            <span>خوش آمدید</span>
+            <h1>سیستم مدیریت پخش</h1>
+            <p>Distribution Management System</p>
           </div>
 
-          <h1>سیستم مدیریت شرکت پخش</h1>
+          <form onSubmit={login} className="botanical-login-form">
+            {error && <div className="login-error">{error}</div>}
 
-          <p>
-            مدیریت مشتریان، سفارشات و امور مالی
-          </p>
-        </div>
+            <label className="botanical-field">
+              <span>نام کاربری</span>
+              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="A.Tork" autoComplete="username" disabled={loading} />
+            </label>
 
-        <form
-          className="login-form"
-          onSubmit={login}
-        >
-          {error && (
-            <div className="login-error">
-              {error}
-            </div>
-          )}
+            <label className="botanical-field">
+              <span>رمز عبور</span>
+              <div className="botanical-password">
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+                <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "پنهان کردن رمز عبور" : "نمایش رمز عبور"}>
+                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
+            </label>
 
-          <div className="form-field">
-            <label>نام کاربری</label>
+            <button className="botanical-submit" disabled={loading}>
+              {loading ? "در حال ورود..." : "ورود به سیستم"}
+            </button>
+          </form>
 
-            <input
-              className="input"
-              value={username}
-              onChange={(e) =>
-                setUsername(e.target.value)
-              }
-              placeholder="نام کاربری"
-              autoComplete="username"
-              disabled={loading}
-            />
-          </div>
-
-          <div className="form-field">
-            <label>رمز عبور</label>
-
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
-              }
-              placeholder="رمز عبور"
-              autoComplete="current-password"
-              disabled={loading}
-            />
-          </div>
-
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={loading}
-          >
-            {loading
-              ? "در حال ورود..."
-              : "ورود به سیستم"}
-          </button>
-        </form>
-
-        <div className="login-hint">
-          <b>کاربران سیستم:</b>
-          <br />
-          مدیر: A.Tork
-          <br />
-          ویزیتور: A.Najari
+          <p className="login-help">برای ورود از نام کاربری سازمانی خود استفاده کنید.</p>
         </div>
       </section>
     </main>
