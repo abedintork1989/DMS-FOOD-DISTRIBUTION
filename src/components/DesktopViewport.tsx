@@ -11,10 +11,6 @@ import {
 
 type DesktopViewportProps = {
   children: ReactNode;
-  /**
-   * عرض مرجع کل برنامه روی دسکتاپ.
-   * کل UI روی موبایل دقیقاً از همین عرض Scale می‌شود.
-   */
   baseWidth?: number;
 };
 
@@ -23,30 +19,34 @@ export default function DesktopViewport({
   baseWidth = 1280,
 }: DesktopViewportProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
+
   const [scale, setScale] = useState(1);
-  const [canvasHeight, setCanvasHeight] = useState<number | null>(null);
+  const [contentHeight, setContentHeight] = useState(1);
 
   const updateViewport = useCallback(() => {
-    const viewportWidth = window.innerWidth;
+    const viewportWidth = Math.max(window.innerWidth, 1);
 
-    // روی دسکتاپ بزرگ‌تر از عرض پایه، Layout بدون بزرگ‌نمایی می‌ماند.
-    // روی موبایل/تبلت کل Desktop Layout کوچک می‌شود.
+    // Desktop stays at the original design size.
+    // On smaller screens, the complete desktop UI scales down to fit.
     const nextScale = Math.min(1, viewportWidth / baseWidth);
 
     setScale(nextScale);
 
     if (canvasRef.current) {
-      const height = canvasRef.current.scrollHeight;
-      setCanvasHeight(height * nextScale);
+      const measuredHeight = Math.max(
+        canvasRef.current.scrollHeight,
+        canvasRef.current.offsetHeight,
+        1
+      );
+
+      setContentHeight(measuredHeight);
     }
   }, [baseWidth]);
 
   useEffect(() => {
     updateViewport();
 
-    const handleResize = () => {
-      updateViewport();
-    };
+    const handleResize = () => updateViewport();
 
     window.addEventListener("resize", handleResize);
 
@@ -54,65 +54,70 @@ export default function DesktopViewport({
 
     if (canvasRef.current && typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(() => {
-        updateViewport();
+        requestAnimationFrame(updateViewport);
       });
 
       observer.observe(canvasRef.current);
     }
 
+    const firstMeasure = window.setTimeout(updateViewport, 100);
+    const secondMeasure = window.setTimeout(updateViewport, 500);
+
     return () => {
       window.removeEventListener("resize", handleResize);
       observer?.disconnect();
+      window.clearTimeout(firstMeasure);
+      window.clearTimeout(secondMeasure);
     };
-  }, [updateViewport]);
+  }, [updateViewport, children]);
 
-  useEffect(() => {
-    // بعد از لود فونت/عکس/جدول‌ها دوباره ارتفاع واقعی Canvas را بگیر.
-    const timer = window.setTimeout(updateViewport, 150);
+  const stageWidth = baseWidth * scale;
+  const stageHeight = Math.max(contentHeight * scale, 1);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [children, updateViewport]);
-
-  const outerStyle: CSSProperties = {
-    width: "100vw",
+  const stageStyle: CSSProperties = {
+    width: `${stageWidth}px`,
+    height: `${stageHeight}px`,
     maxWidth: "100vw",
-    overflowX: "hidden",
-    overflowY: "visible",
+    marginLeft: "auto",
+    marginRight: "auto",
     position: "relative",
-    display: "flex",
-    justifyContent: "center",
+    overflow: "visible",
   };
 
   const canvasStyle: CSSProperties = {
     width: `${baseWidth}px`,
     minWidth: `${baseWidth}px`,
+    position: "absolute",
+    top: 0,
+    left: 0,
     transform: `scale(${scale})`,
-    transformOrigin: scale < 1 ? "top left" : "top center",
-    position: "relative",
+    transformOrigin: "top left",
     willChange: "transform",
-    marginLeft: scale >= 1 ? "auto" : 0,
-    marginRight: scale >= 1 ? "auto" : 0,
   };
 
   return (
     <div
       className="desktop-viewport"
       style={{
-        ...outerStyle,
-        height:
-          scale < 1 && canvasHeight !== null
-            ? `${Math.max(canvasHeight, 1)}px`
-            : "auto",
+        width: "100%",
+        maxWidth: "100%",
+        minHeight: "100vh",
+        overflowX: "hidden",
+        overflowY: "visible",
+        position: "relative",
       }}
     >
       <div
-        ref={canvasRef}
-        className="desktop-canvas"
-        style={canvasStyle}
+        className="desktop-scale-stage"
+        style={stageStyle}
       >
-        {children}
+        <div
+          ref={canvasRef}
+          className="desktop-canvas"
+          style={canvasStyle}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );
