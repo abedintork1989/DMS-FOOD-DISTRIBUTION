@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bell,
   Boxes,
+  CheckCircle2,
   ChevronDown,
   CircleHelp,
   LayoutDashboard,
@@ -44,6 +45,7 @@ const menuGroups = [
     items: [
       { href: "/marketing", label: "مارکتینگ", icon: Megaphone },
       { href: "/finance", label: "حسابداری", icon: Wallet },
+      { href: "/checks", label: "مدیریت چک ها", icon: CheckCircle2 },
     ],
   },
 ];

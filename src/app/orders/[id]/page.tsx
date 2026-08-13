@@ -997,6 +997,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
                   );
                 })()
               : null,
+            warehouse_send_date: null,
           })
           .eq("id", id);
 

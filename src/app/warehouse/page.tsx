@@ -18,6 +18,8 @@ type Order = {
   invoice_total?: number | null;
   created_at: string;
   order_number?: string | null;
+  send_date?: string | null;
+  warehouse_send_date?: string | null;
   delivery_date?: string | null;
   customers?: {
     name: string;
@@ -61,6 +63,48 @@ function formatDate(value: string) {
   } catch {
     return value;
   }
+}
+
+function formatSendDate(value: string | null | undefined) {
+  if (!value) return "-";
+
+  const clean = String(value).trim();
+  const raw = clean.substring(0, 10);
+
+  const jalaliParts = raw.split("/");
+  if (
+    jalaliParts.length === 3 &&
+    Number(jalaliParts[0]) >= 1300 &&
+    Number(jalaliParts[0]) <= 1500
+  ) {
+    return `${toPersianDigits(jalaliParts[0])}/${toPersianDigits(
+      String(jalaliParts[1]).padStart(2, "0")
+    )}/${toPersianDigits(
+      String(jalaliParts[2]).padStart(2, "0")
+    )}`;
+  }
+
+  const date = new Date(`${raw}T12:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return clean;
+  }
+
+  const formatter = new Intl.DateTimeFormat(
+    "fa-IR-u-ca-persian-nu-latn",
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  );
+
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((p) => p.type === "year")?.value || "";
+  const month = parts.find((p) => p.type === "month")?.value || "";
+  const day = parts.find((p) => p.type === "day")?.value || "";
+
+  return `${toPersianDigits(year)}/${toPersianDigits(month)}/${toPersianDigits(day)}`;
 }
 
 // نمایش تاریخ تحویل دقیقاً مثل تاریخ ثبت سفارش بدون تبدیل اشتباه شمسی به میلادی
@@ -201,6 +245,18 @@ export default function WarehousePage() {
         accessor: (row) => formatDate(row.created_at),
       },
       {
+        key: "warehouse_send_date",
+        title: "تاریخ ارسال سفارش",
+        width: 130,
+        filterable: true,
+        searchable: true,
+        sortable: true,
+        accessor: (row) =>
+          formatSendDate(
+            row.warehouse_send_date || row.send_date || null
+          ),
+      },
+      {
         key: "delivery_date",
         title: "تاریخ تحویل سفارش",
         width: 130,
@@ -236,7 +292,42 @@ export default function WarehousePage() {
         accessor: (row) => warehouseStatus(row.status).label,
         render: (_value, row) => {
           const status = warehouseStatus(row.status);
-          return <span className={`badge ${status.className}`}>{status.label}</span>;
+
+          const background =
+            row.status === "approved"
+              ? "#fed7aa"
+              : row.status === "delivered"
+              ? "#dcfce7"
+              : "#f8fafc";
+
+          const foreground =
+            row.status === "approved"
+              ? "#9a3412"
+              : row.status === "delivered"
+              ? "#166534"
+              : "#475569";
+
+          return (
+            <div
+              style={{
+                width: "calc(100% + 12px)",
+                minHeight: "100%",
+                margin: "-8px -6px",
+                padding: "8px 6px",
+                boxSizing: "border-box",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background,
+                color: foreground,
+                fontWeight: 700,
+                textAlign: "center",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {status.label}
+            </div>
+          );
         },
       },
       {
@@ -268,12 +359,95 @@ export default function WarehousePage() {
 
   return (
     <AppShell>
+      <style jsx global>{`
+        .warehouse-page-auto {
+          width: 100% !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+          overflow: visible !important;
+        }
+
+        .warehouse-page-auto .table-wrap {
+          width: 100% !important;
+          max-width: 100% !important;
+          overflow: visible !important;
+        }
+
+        .warehouse-page-auto .table-wrap,
+        .warehouse-page-auto .table-wrap > div {
+          overflow: visible !important;
+        }
+
+        .warehouse-page-auto table {
+          width: 100% !important;
+          max-width: 100% !important;
+          table-layout: fixed !important;
+        }
+
+        .warehouse-page-auto th,
+        .warehouse-page-auto td {
+          padding: 7px 5px !important;
+          font-size: clamp(11px, 0.82vw, 14px) !important;
+          line-height: 1.35 !important;
+          white-space: nowrap;
+          box-sizing: border-box !important;
+        }
+
+        .warehouse-page-auto th {
+          position: relative !important;
+          overflow: visible !important;
+          z-index: 20 !important;
+        }
+
+        .warehouse-page-auto td {
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .warehouse-page-auto th [role="dialog"],
+        .warehouse-page-auto th [data-radix-popper-content-wrapper],
+        .warehouse-page-auto th .filter-menu,
+        .warehouse-page-auto th .filter-dropdown {
+          z-index: 99999 !important;
+        }
+
+        .warehouse-page-auto th:nth-child(1),
+        .warehouse-page-auto td:nth-child(1) { width: 8% !important; }
+
+        .warehouse-page-auto th:nth-child(2),
+        .warehouse-page-auto td:nth-child(2) { width: 13% !important; }
+
+        .warehouse-page-auto th:nth-child(3),
+        .warehouse-page-auto td:nth-child(3) { width: 8% !important; }
+
+        .warehouse-page-auto th:nth-child(4),
+        .warehouse-page-auto td:nth-child(4) { width: 10% !important; }
+
+        .warehouse-page-auto th:nth-child(5),
+        .warehouse-page-auto td:nth-child(5) { width: 10% !important; }
+
+        .warehouse-page-auto th:nth-child(6),
+        .warehouse-page-auto td:nth-child(6) { width: 10% !important; }
+
+        .warehouse-page-auto th:nth-child(7),
+        .warehouse-page-auto td:nth-child(7) { width: 10% !important; }
+
+        .warehouse-page-auto th:nth-child(8),
+        .warehouse-page-auto td:nth-child(8) { width: 11% !important; }
+
+        .warehouse-page-auto th:nth-child(9),
+        .warehouse-page-auto td:nth-child(9) { width: 8% !important; }
+
+        .warehouse-page-auto th:nth-child(10),
+        .warehouse-page-auto td:nth-child(10) { width: 13% !important; min-width: 135px !important; }
+      `}</style>
+
       <PageHeader
         title="انبار"
         subtitle="مدیریت سفارش‌های تأییدشده و تحویل سفارشات"
       />
 
-      <div className="panel">
+      <div className="panel warehouse-page-auto">
         {loading ? (
           <div style={{ padding: 40, textAlign: "center" }}>
             در حال دریافت سفارشات انبار...
@@ -293,17 +467,7 @@ export default function WarehousePage() {
             data={orders}
             columns={columns}
             rowKey={(order) => order.id}
-            rowClassName={(order) => {
-              if (order.status === "delivered") {
-                return "warehouse-delivered-row";
-              }
-
-              if (order.status === "approved") {
-                return "warehouse-approved-row";
-              }
-
-              return "";
-            }}
+            rowClassName={() => ""}
             pageSize={0}
             emptyText="سفارشی در انبار پیدا نشد."
           />

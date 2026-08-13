@@ -1,7 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Save, Trash2, Paperclip } from "lucide-react";
+import { FormEvent, ReactElement, useEffect, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  Save,
+  Trash2,
+  Paperclip,
+  Link2,
+  ChevronDown,
+  Zap,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 
 import AppShell from "@/components/AppShell";
@@ -14,6 +22,29 @@ type Customer = {
   id: string;
   name: string;
   province?: string | null;
+  settlement_days?: number | null;
+};
+
+type PaymentAllocation = {
+  id: string;
+  payment_id: string | null;
+  marketing_id: string | null;
+  order_id: string;
+  amount: number;
+};
+
+type MarketingRaw = {
+  id: string;
+  totalAmount: number;
+  description: string | null;
+};
+
+type OrderRaw = {
+  id: string;
+  order_number: string | number;
+  invoice_total: number;
+  delivery_date: string | null;
+  settlement_due_date: string | null;
 };
 
 type PaymentRecord = {
@@ -43,8 +74,13 @@ type LedgerRow = {
   description?: string | null;
   amount: number;
   date: string | null;
+  deliveryDate?: string | null;
+  settlementDueDate?: string | null;
   paymentType?: PaymentType;
   payment?: PaymentRecord;
+  orderId?: string;
+  invoiceTotal?: number;
+  marketingId?: string;
 };
 
 const paymentLabels: Record<PaymentType, string> = {
@@ -64,7 +100,7 @@ const CHECK_STATUS_META: Record<
     color: "#92400e",
   },
   due: {
-    label: "سررسید",
+    label: "عدم وصول  ",
     background: "#fee2e2",
     color: "#b91c1c",
   },
@@ -79,10 +115,19 @@ const CHECK_STATUS_META: Record<
     color: "#92400e",
   },
   returned: {
-    label: "سررسید",
+    label: "عدم وصول  ",
     background: "#fee2e2",
     color: "#b91c1c",
   },
+};
+
+const SETTLEMENT_META: Record<
+  "settled" | "partial" | "unpaid",
+  { label: string; background: string; color: string }
+> = {
+  settled: { label: "تسویه کامل", background: "#dcfce7", color: "#166534" },
+  partial: { label: "پرداخت ناقص", background: "#fef3c7", color: "#92400e" },
+  unpaid: { label: "بدون پرداخت", background: "#fee2e2", color: "#b91c1c" },
 };
 
 function normalizedCheckStatus(status: string | null | undefined) {
@@ -255,6 +300,88 @@ function gregorianStringToJalali(value: string) {
   return gregorianToJalali(gy, gm, gd);
 }
 
+/**
+ * orders.delivery_date در پروژه شما یک تاریخ شمسی با فرمت YYYY/MM/DD است.
+ * بنابراین نباید با new Date() یا gregorianToJalali روی آن کار شود.
+ */
+function jalaliStringToParts(value: string | null) {
+  if (!value) return null;
+
+  const normalized = String(value)
+    .trim()
+    .split(" ")[0]
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+  const parts = normalized.includes("/")
+    ? normalized.split("/")
+    : normalized.split("-");
+
+  if (parts.length !== 3) return null;
+
+  const [jy, jm, jd] = parts.map(Number);
+
+  if (!jy || !jm || !jd) return null;
+  if (jm < 1 || jm > 12) return null;
+  if (jd < 1 || jd > jalaliDaysInMonth(jy, jm)) return null;
+
+  return { jy, jm, jd };
+}
+
+function formatStoredJalaliDate(value: string | null) {
+  const parsed = jalaliStringToParts(value);
+  if (!parsed) return value ? toPersianDigits(String(value).trim()) : "-";
+
+  return `${toPersianDigits(parsed.jy)}/${toPersianDigits(
+    String(parsed.jm).padStart(2, "0")
+  )}/${toPersianDigits(String(parsed.jd).padStart(2, "0"))}`;
+}
+
+/**
+ * محاسبه موعد تسویه فقط در تقویم شمسی.
+ * نمونه: 1405/05/22 + 60 روز = 1405/07/21
+ */
+function addDaysToJalaliString(value: string | null, daysToAdd: number) {
+  const parsed = jalaliStringToParts(value);
+  if (!parsed) return null;
+
+  let jy = parsed.jy;
+  let jm = parsed.jm;
+  let jd = parsed.jd;
+
+  const settlementDays = Math.max(
+    0,
+    Math.trunc(Number(daysToAdd) || 0)
+  );
+
+  // قرارداد این برنامه برای موعد تسویه:
+  // برای نمونه‌ی مشخص‌شده، 1405/05/22 با تسویه 60 روزه باید 1405/07/21 باشد.
+  // بنابراین موعد را روی روزِ پس از تکمیل تعداد روزهای تسویه قرار می‌دهیم.
+  let steps = settlementDays > 0 ? settlementDays + 1 : 0;
+
+  while (steps > 0) {
+    jd += 1;
+
+    if (jd > jalaliDaysInMonth(jy, jm)) {
+      jd = 1;
+
+      if (jm === 12) {
+        jy += 1;
+        jm = 1;
+      } else {
+        jm += 1;
+      }
+    }
+
+    steps -= 1;
+  }
+
+  return `${jy}-${String(jm).padStart(2, "0")}-${String(jd).padStart(
+    2,
+    "0"
+  )}`;
+}
+
 function jalaliPartsToGregorianString(
   jy: number,
   jm: number,
@@ -269,6 +396,10 @@ function jalaliPartsToGregorianString(
 }
 
 function faDate(value: string | null) {
+  return formatStoredJalaliDate(value);
+}
+
+function faGregorianDate(value: string | null) {
   if (!value) return "-";
 
   const { jy, jm, jd } = gregorianStringToJalali(value);
@@ -403,18 +534,19 @@ export default function CustomerFinancePage() {
   const params = useParams();
   const router = useRouter();
 
-  // IMPORTANT:
-  // This route is src/app/finance/[id]/page.tsx,
-  // therefore the dynamic parameter is "id".
   const customerId = String(params?.id ?? "");
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [orders, setOrders] = useState<OrderRaw[]>([]);
+  const [marketingItems, setMarketingItems] = useState<MarketingRaw[]>([]);
+  const [allocations, setAllocations] = useState<PaymentAllocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const currentJalali = useMemo(() => getCurrentJalali(), []);
 
+  // ---- payment form state ----
   const [paymentType, setPaymentType] = useState<PaymentType>("cash");
   const [amount, setAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => {
@@ -452,6 +584,16 @@ export default function CustomerFinancePage() {
     checkStatus: "",
   });
 
+  // ---- allocation state ----
+  const [expandedSource, setExpandedSource] = useState<{
+    type: "payment" | "marketing";
+    id: string;
+  } | null>(null);
+  const [allocationDrafts, setAllocationDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [savingAllocations, setSavingAllocations] = useState(false);
+
   function setFilter(key: keyof typeof filters, value: string) {
     setFilters((previous) => ({ ...previous, [key]: value }));
   }
@@ -472,13 +614,16 @@ export default function CustomerFinancePage() {
     }
   }, [customerId]);
 
+  // اگر پرداخت بازشده دیگر در لیست فیلترشده نبود، پنل عطف را ببند
+  // (این useEffect بعد از تعریف filteredLedger قرار گرفته است)
+
   async function loadFinance() {
     setLoading(true);
 
     try {
       const customerResult = await supabase
         .from("customers")
-        .select("id,name,province")
+        .select("id,name,province,settlement_days")
         .eq("id", customerId)
         .single();
 
@@ -486,10 +631,15 @@ export default function CustomerFinancePage() {
 
       setCustomer(customerResult.data as Customer);
 
-      const [ordersResult, paymentsResult, marketingResult] = await Promise.all([
+      const [
+        ordersResult,
+        paymentsResult,
+        marketingResult,
+        allocationsResult,
+      ] = await Promise.all([
         supabase
           .from("orders")
-          .select("id,order_number,invoice_total,delivery_date")
+          .select("id,order_number,invoice_total,delivery_date,settlement_due_date")
           .eq("customer_id", customerId)
           .eq("status", "delivered")
           .order("delivery_date", { ascending: false }),
@@ -505,34 +655,80 @@ export default function CustomerFinancePage() {
         supabase
           .from("customer_marketing")
           .select(
-            "id,start_date,end_date,shelf_rent,tray_rent,board_rent,promoter_cost,side_cost,foc_amount"
+            "id,start_date,end_date,shelf_rent,tray_rent,board_rent,promoter_cost,side_cost,foc_amount,description"
           )
           .eq("customer_id", customerId)
           .order("start_date", { ascending: false }),
+
+        supabase
+          .from("payment_allocations")
+          .select("id,payment_id,marketing_id,order_id,amount")
+          .eq("customer_id", customerId),
       ]);
 
       if (ordersResult.error) throw ordersResult.error;
       if (paymentsResult.error) throw paymentsResult.error;
       if (marketingResult.error) throw marketingResult.error;
+      if (allocationsResult.error) throw allocationsResult.error;
+
+      // ذخیره سفارش‌های خام برای جدول تسویه و پنل عطف
+      const rawOrders: OrderRaw[] = (ordersResult.data || []).map(
+        (o: any) => ({
+          id: o.id,
+          order_number: o.order_number ?? o.id,
+          invoice_total: Number(o.invoice_total || 0),
+          delivery_date: o.delivery_date || null,
+          settlement_due_date: o.settlement_due_date || null,
+        })
+      );
+      setOrders(rawOrders);
+
+      // ذخیره مارکتینگ‌های خام برای پنل عطف
+      const rawMarketing: MarketingRaw[] = (marketingResult.data || []).map(
+        (item: any) => ({
+          id: item.id,
+          totalAmount:
+            Number(item.shelf_rent || 0) +
+            Number(item.tray_rent || 0) +
+            Number(item.board_rent || 0) +
+            Number(item.promoter_cost || 0) +
+            Number(item.side_cost || 0) +
+            Number(item.foc_amount || 0),
+          description: item.description || null,
+        })
+      );
+      setMarketingItems(rawMarketing);
+
+      // ذخیره عطف‌ها
+      const rawAllocations: PaymentAllocation[] = (
+        allocationsResult.data || []
+      ).map((a: any) => ({
+        id: a.id,
+        payment_id: a.payment_id || null,
+        marketing_id: a.marketing_id || null,
+        order_id: a.order_id,
+        amount: Number(a.amount || 0),
+      }));
+      setAllocations(rawAllocations);
 
       const orderRows: LedgerRow[] = (ordersResult.data || []).map(
         (order: any) => ({
           id: `order-${order.id}`,
+          orderId: order.id,
           documentType: "سفارش",
           documentNumber: String(order.order_number || order.id),
           description: null,
           amount: Number(order.invoice_total || 0),
-          // تاریخ دریافت بار، دقیقاً همان تاریخی است که «انبار» هنگام
-          // تحویل سفارش ثبت می‌کند (delivery_date). اگر انبار هنوز
-          // این تاریخ را ثبت نکرده باشد، به‌جای نمایش تاریخ نادرست
-          // (مثل تاریخ ثبت سفارش)، خط تیره نمایش داده می‌شود.
+          invoiceTotal: Number(order.invoice_total || 0),
           date: order.delivery_date || null,
+          deliveryDate: order.delivery_date || null,
+          settlementDueDate: addDaysToJalaliString(
+            order.delivery_date || null,
+            Number(customerResult.data?.settlement_days || 0)
+          ),
         })
       );
 
-      // ردیف‌های هزینه‌های مارکتینگ این مشتری؛
-      // این هزینه‌ها مانند یک پرداختی برای مشتری محسوب می‌شوند
-      // (بدهی مشتری را کاهش می‌دهند) و نوع سندشان «مارکتینگ» است.
       const marketingRows: LedgerRow[] = (marketingResult.data || []).map(
         (item: any) => {
           const totalAmount =
@@ -545,11 +741,14 @@ export default function CustomerFinancePage() {
 
           return {
             id: `marketing-${item.id}`,
+            marketingId: item.id,
             documentType: "مارکتینگ",
             documentNumber: "-",
-            description: "هزینه‌های حمایتی مارکتینگ",
+            description: item.description || null,
             amount: -totalAmount,
             date: item.end_date || item.start_date || null,
+          deliveryDate: null,
+          settlementDueDate: null,
           };
         }
       );
@@ -562,6 +761,8 @@ export default function CustomerFinancePage() {
           description: payment.description || null,
           amount: -Number(payment.amount || 0),
           date: payment.payment_date || null,
+          deliveryDate: null,
+          settlementDueDate: null,
           paymentType: payment.payment_type as PaymentType,
           payment: {
             id: payment.id,
@@ -605,6 +806,55 @@ export default function CustomerFinancePage() {
     }
   }
 
+  // ---- maps from allocations ----
+  const orderAllocationMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const a of allocations) {
+      map[a.order_id] = (map[a.order_id] || 0) + a.amount;
+    }
+    return map;
+  }, [allocations]);
+
+  const paymentAllocationMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const a of allocations) {
+      if (a.payment_id) {
+        map[a.payment_id] = (map[a.payment_id] || 0) + a.amount;
+      }
+    }
+    return map;
+  }, [allocations]);
+
+  const marketingAllocationMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const a of allocations) {
+      if (a.marketing_id) {
+        map[a.marketing_id] = (map[a.marketing_id] || 0) + a.amount;
+      }
+    }
+    return map;
+  }, [allocations]);
+
+  // ---- settlement per order ----
+  const orderSettlements = useMemo(() => {
+    return orders.map((order) => {
+      const paid = orderAllocationMap[order.id] || 0;
+      const remaining = order.invoice_total - paid;
+      const status: "settled" | "partial" | "unpaid" =
+        remaining <= 0 ? "settled" : paid > 0 ? "partial" : "unpaid";
+      return {
+        ...order,
+        paid,
+        remaining: Math.max(0, remaining),
+        status,
+        progress:
+          order.invoice_total > 0
+            ? Math.min(100, (paid / order.invoice_total) * 100)
+            : 0,
+      };
+    });
+  }, [orders, orderAllocationMap]);
+
   const totals = useMemo(() => {
     const invoices = ledger
       .filter((row) => row.documentType === "سفارش")
@@ -618,14 +868,43 @@ export default function CustomerFinancePage() {
       )
       .reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
+    const totalAllocated = allocations.reduce(
+      (sum, a) => sum + a.amount,
+      0
+    );
+
+    // مجموع منابع قابل عطف:
+    // 1) سندهای پرداختی ثبت‌شده توسط کاربر
+    // 2) هزینه‌های مارکتینگ که به‌عنوان منبع قابل عطف ثبت شده‌اند
+    const totalAllocatableSources = ledger
+      .filter(
+        (row) =>
+          row.documentType === "سند پرداختی" ||
+          row.documentType === "مارکتینگ"
+      )
+      .reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+
+    // مبلغی که هنوز به هیچ فاکتوری عطف نشده است.
+    // totalAllocated شامل عطف‌های پرداختی و مارکتینگ است.
+    const unallocated = Math.max(
+      0,
+      totalAllocatableSources - totalAllocated
+    );
+
+    const invoiceRemaining = orderSettlements.reduce(
+      (sum, o) => sum + o.remaining,
+      0
+    );
+
     return {
       invoices,
       payments,
       balance: invoices - payments,
+      totalAllocated,
+      unallocated,
+      invoiceRemaining,
     };
-  }
-, [ledger]);
-
+  }, [ledger, allocations, orderSettlements]);
 
   const filteredLedger = useMemo(() => {
     const normalizeDigits = (value: string) =>
@@ -669,13 +948,273 @@ export default function CustomerFinancePage() {
         if (!rowAmount.includes(amountQuery)) return false;
       }
 
-      if (filters.date && !faDate(row.date).includes(filters.date.trim())) {
-        return false;
+      if (filters.date) {
+        const deliveryDate = row.documentType === "سفارش" ? row.deliveryDate : null;
+        if (!faDate(deliveryDate || null).includes(filters.date.trim())) return false;
       }
 
       return true;
     });
   }, [ledger, filters]);
+
+  // اگر سند بازشده دیگر در لیست فیلترشده نبود، پنل عطف را ببند
+  useEffect(() => {
+    if (!expandedSource) return;
+
+    const stillVisible = filteredLedger.some((row) => {
+      if (expandedSource.type === "payment") {
+        return (
+          row.payment?.id === expandedSource.id &&
+          row.documentType === "سند پرداختی"
+        );
+      }
+      return (
+        row.marketingId === expandedSource.id &&
+        row.documentType === "مارکتینگ"
+      );
+    });
+
+    if (!stillVisible) {
+      setExpandedSource(null);
+      setAllocationDrafts({});
+    }
+  }, [expandedSource, filteredLedger]);
+
+  // ---- allocation functions ----
+
+  // دریافت مبلغ و شناسه سند مبدأ (پرداخت یا مارکتینگ)
+  function getSourceInfo(row: LedgerRow): {
+    type: "payment" | "marketing";
+    id: string;
+    amount: number;
+  } | null {
+    if (row.documentType === "سند پرداختی" && row.payment) {
+      return { type: "payment", id: row.payment.id, amount: row.payment.amount };
+    }
+    if (row.documentType === "مارکتینگ" && row.marketingId) {
+      return {
+        type: "marketing",
+        id: row.marketingId,
+        amount: Math.abs(row.amount),
+      };
+    }
+    return null;
+  }
+
+  function getSourceAllocated(sourceType: "payment" | "marketing", sourceId: string): number {
+    if (sourceType === "payment") {
+      return paymentAllocationMap[sourceId] || 0;
+    }
+    return marketingAllocationMap[sourceId] || 0;
+  }
+
+  function expandRow(row: LedgerRow) {
+    const source = getSourceInfo(row);
+    if (!source) return;
+
+    const key = `${source.type}:${source.id}`;
+    const currentKey = expandedSource
+      ? `${expandedSource.type}:${expandedSource.id}`
+      : null;
+
+    if (currentKey === key) {
+      setExpandedSource(null);
+      setAllocationDrafts({});
+      return;
+    }
+
+    // پیش‌پر کردن درفت‌ها با عطف‌های موجود
+    const drafts: Record<string, string> = {};
+    for (const order of orders) {
+      const existing = allocations.find((a) => {
+        if (source.type === "payment") {
+          return a.payment_id === source.id && a.order_id === order.id;
+        }
+        return a.marketing_id === source.id && a.order_id === order.id;
+      });
+      if (existing) {
+        drafts[order.id] = formatInputMoney(String(existing.amount));
+      }
+    }
+    setAllocationDrafts(drafts);
+    setExpandedSource({ type: source.type, id: source.id });
+  }
+
+  function autoAllocate(row: LedgerRow) {
+    const source = getSourceInfo(row);
+    if (!source) return;
+
+    // عطف‌های موجود این سند
+    const existingMap: Record<string, number> = {};
+    for (const a of allocations) {
+      const matches =
+        source.type === "payment"
+          ? a.payment_id === source.id
+          : a.marketing_id === source.id;
+      if (matches) {
+        existingMap[a.order_id] = a.amount;
+      }
+    }
+
+    // مرتب‌سازی سفارش‌ها بر اساس تاریخ تحویل (قدیمی‌ترین اول)
+    const sortedOrders = [...orders].sort((a, b) => {
+      const aDate = jalaliStringToParts(a.delivery_date);
+      const bDate = jalaliStringToParts(b.delivery_date);
+
+      const aKey = aDate
+        ? `${aDate.jy.toString().padStart(4, "0")}${aDate.jm
+            .toString()
+            .padStart(2, "0")}${aDate.jd.toString().padStart(2, "0")}`
+        : "99999999";
+      const bKey = bDate
+        ? `${bDate.jy.toString().padStart(4, "0")}${bDate.jm
+            .toString()
+            .padStart(2, "0")}${bDate.jd.toString().padStart(2, "0")}`
+        : "99999999";
+
+      if (aKey !== bKey) return aKey.localeCompare(bKey);
+      return String(a.order_number).localeCompare(String(b.order_number));
+    });
+
+    let remaining = source.amount;
+    const drafts: Record<string, string> = {};
+
+    for (const order of sortedOrders) {
+      if (remaining <= 0) break;
+
+      const totalAllocated = orderAllocationMap[order.id] || 0;
+      const allocatedByThis = existingMap[order.id] || 0;
+      const allocatedByOthers = totalAllocated - allocatedByThis;
+      const orderRemaining = Number(order.invoice_total || 0) - allocatedByOthers;
+
+      if (orderRemaining <= 0) continue;
+
+      const allocationAmount = Math.min(remaining, orderRemaining);
+      drafts[order.id] = formatInputMoney(String(allocationAmount));
+      remaining -= allocationAmount;
+    }
+
+    setAllocationDrafts(drafts);
+  }
+
+  async function saveAllocations(row: LedgerRow) {
+    const source = getSourceInfo(row);
+    if (!source) return;
+
+    // تجمیع درفت‌ها
+    const newAllocations: Array<{ order_id: string; amount: number }> = [];
+    let totalAllocated = 0;
+
+    for (const [orderId, amountStr] of Object.entries(allocationDrafts)) {
+      const amt = Number(normalizeNumber(amountStr));
+      if (amt > 0) {
+        newAllocations.push({ order_id: orderId, amount: amt });
+        totalAllocated += amt;
+      }
+    }
+
+    if (totalAllocated > source.amount) {
+      alert(
+        `مجموع عطف‌ها (${money(
+          totalAllocated
+        )}) بیشتر از مبلغ سند مبدأ (${money(source.amount)}) است.`
+      );
+      return;
+    }
+
+    // اعتبارسنجی مانده فاکتور
+    for (const alloc of newAllocations) {
+      const order = orders.find((o) => o.id === alloc.order_id);
+      if (!order) continue;
+
+      const existingAmount =
+        allocations.find((a) => {
+          if (source.type === "payment") {
+            return a.payment_id === source.id && a.order_id === alloc.order_id;
+          }
+          return a.marketing_id === source.id && a.order_id === alloc.order_id;
+        })?.amount || 0;
+      const allocatedByOthers = (orderAllocationMap[alloc.order_id] || 0) - existingAmount;
+      const orderRemaining = Number(order.invoice_total || 0) - allocatedByOthers;
+
+      if (alloc.amount > orderRemaining) {
+        alert(
+          `مبلغ عطف برای سفارش ${order.order_number} بیشتر از مانده فاکتور (${money(
+            orderRemaining
+          )}) است.`
+        );
+        return;
+      }
+    }
+
+    setSavingAllocations(true);
+
+    try {
+      // حذف عطف‌های قبلی این سند مبدأ
+      let deleteQuery = supabase
+        .from("payment_allocations")
+        .delete()
+        .eq("customer_id", customerId);
+
+      if (source.type === "payment") {
+        deleteQuery = deleteQuery.eq("payment_id", source.id);
+      } else {
+        deleteQuery = deleteQuery.eq("marketing_id", source.id);
+      }
+
+      const { error: deleteError } = await deleteQuery;
+      if (deleteError) throw deleteError;
+
+      // درج عطف‌های جدید
+      if (newAllocations.length > 0) {
+        const insertPayload = newAllocations.map((a) => ({
+          customer_id: customerId,
+          payment_id: source.type === "payment" ? source.id : null,
+          marketing_id: source.type === "marketing" ? source.id : null,
+          order_id: a.order_id,
+          amount: a.amount,
+        }));
+
+        const { error: insertError } = await supabase
+          .from("payment_allocations")
+          .insert(insertPayload);
+
+        if (insertError) throw insertError;
+      }
+
+      // بارگذاری مجدد عطف‌ها
+      const { data: allocData, error: allocError } = await supabase
+        .from("payment_allocations")
+        .select("id,payment_id,marketing_id,order_id,amount")
+        .eq("customer_id", customerId);
+
+      if (allocError) throw allocError;
+
+      setAllocations(
+        (allocData || []).map((a: any) => ({
+          id: a.id,
+          payment_id: a.payment_id || null,
+          marketing_id: a.marketing_id || null,
+          order_id: a.order_id,
+          amount: Number(a.amount || 0),
+        }))
+      );
+
+      setExpandedSource(null);
+      setAllocationDrafts({});
+
+      alert("عطف‌ها با موفقیت ذخیره شد.");
+    } catch (error: any) {
+      console.error("SAVE ALLOCATIONS ERROR:", error);
+      alert(
+        `خطا در ذخیره عطف‌ها: ${
+          error?.message || "خطای نامشخص"
+        }`
+      );
+    } finally {
+      setSavingAllocations(false);
+    }
+  }
 
   function resetForm() {
     setEditingPaymentId(null);
@@ -769,8 +1308,6 @@ export default function CustomerFinancePage() {
     );
   }
 
-
-
   function getStoragePathFromPublicUrl(url: string) {
     try {
       const parsed = new URL(url);
@@ -788,11 +1325,7 @@ export default function CustomerFinancePage() {
   }
 
   async function deleteAttachment(url: string) {
-    if (
-      !window.confirm(
-        "این فایل از سند پرداختی حذف شود؟"
-      )
-    ) {
+    if (!window.confirm("این فایل از سند پرداختی حذف شود؟")) {
       return;
     }
 
@@ -846,9 +1379,7 @@ export default function CustomerFinancePage() {
     } catch (error: any) {
       console.error("DELETE ATTACHMENT ERROR:", error);
       alert(
-        `خطا در حذف فایل: ${
-          error?.message || "خطای نامشخص"
-        }`
+        `خطا در حذف فایل: ${error?.message || "خطای نامشخص"}`
       );
     } finally {
       setSaving(false);
@@ -856,10 +1387,7 @@ export default function CustomerFinancePage() {
   }
 
   async function deletePayment(row: LedgerRow) {
-    if (
-      row.documentType !== "سند پرداختی" ||
-      !row.payment
-    ) {
+    if (row.documentType !== "سند پرداختی" || !row.payment) {
       return;
     }
 
@@ -872,22 +1400,32 @@ export default function CustomerFinancePage() {
     setSaving(true);
 
     try {
-      const attachmentUrls =
-        row.payment.attachment_urls || [];
+      const attachmentUrls = row.payment.attachment_urls || [];
 
       const storagePaths = attachmentUrls
         .map(getStoragePathFromPublicUrl)
-        .filter(
-          (path): path is string => Boolean(path)
-        );
+        .filter((path): path is string => Boolean(path));
 
       if (storagePaths.length > 0) {
-        const { error: storageError } =
-          await supabase.storage
-            .from("payment-attachments")
-            .remove(storagePaths);
+        const { error: storageError } = await supabase.storage
+          .from("payment-attachments")
+          .remove(storagePaths);
 
         if (storageError) throw storageError;
+      }
+
+      // حذف عطف‌های این پرداخت (در صورت عدم cascade در دیتابیس)
+      const { error: allocDeleteError } = await supabase
+        .from("payment_allocations")
+        .delete()
+        .eq("payment_id", row.payment.id)
+        .eq("customer_id", customerId);
+
+      if (allocDeleteError) {
+        console.warn(
+          "ALLOC DELETE WARNING:",
+          allocDeleteError
+        );
       }
 
       const { error: deleteError } = await supabase
@@ -898,6 +1436,13 @@ export default function CustomerFinancePage() {
 
       if (deleteError) throw deleteError;
 
+      // به‌روزرسانی state
+      setAllocations((prev) =>
+        prev.filter(
+          (a) => a.payment_id !== row.payment!.id
+        )
+      );
+
       setLedger((previous) =>
         previous.filter(
           (item) => item.payment?.id !== row.payment!.id
@@ -906,6 +1451,15 @@ export default function CustomerFinancePage() {
 
       if (editingPaymentId === row.payment.id) {
         resetForm();
+      }
+
+      if (
+        expandedSource &&
+        expandedSource.type === "payment" &&
+        expandedSource.id === row.payment.id
+      ) {
+        setExpandedSource(null);
+        setAllocationDrafts({});
       }
 
       alert("سند پرداختی با موفقیت حذف شد.");
@@ -963,6 +1517,22 @@ export default function CustomerFinancePage() {
     if (!numericAmount || numericAmount <= 0) {
       alert("مبلغ پرداخت را وارد کنید.");
       return;
+    }
+
+    // اگر ویرایش و کاهش مبلغ، بررسی عطف‌های موجود
+    if (editingPaymentId) {
+      const existingAllocated =
+        paymentAllocationMap[editingPaymentId] || 0;
+      if (existingAllocated > numericAmount) {
+        alert(
+          `مبلغ جدید (${money(
+            numericAmount
+          )}) کمتر از مجموع عطف‌های ثبت‌شده (${money(
+            existingAllocated
+          )}) است. ابتدا عطف‌ها را اصلاح کنید.`
+        );
+        return;
+      }
     }
 
     if (paymentType === "bank_transfer" && !trackingCode.trim()) {
@@ -1034,11 +1604,11 @@ export default function CustomerFinancePage() {
         if (error) throw error;
         if (!data) throw new Error("ویرایش انجام نشد.");
       } else {
-        const { data:lastPayment } = await supabase
+        const { data: lastPayment } = await supabase
           .from("payments")
           .select("payment_number")
           .eq("customer_id", customerId)
-          .order("payment_number", { ascending:false })
+          .order("payment_number", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -1049,7 +1619,7 @@ export default function CustomerFinancePage() {
           .insert({
             ...payload,
             payment_number: nextNumber,
-            attachment_urls: []
+            attachment_urls: [],
           })
           .select("id")
           .single();
@@ -1061,17 +1631,13 @@ export default function CustomerFinancePage() {
       if (paymentId && paymentFiles.length) {
         const urls = await uploadPaymentFiles(paymentId);
 
-        const { error: attachmentUpdateError } =
-          await supabase
-            .from("payments")
-            .update({
-              attachment_urls: [
-                ...existingAttachments,
-                ...urls,
-              ],
-            })
-            .eq("id", paymentId)
-            .eq("customer_id", customerId);
+        const { error: attachmentUpdateError } = await supabase
+          .from("payments")
+          .update({
+            attachment_urls: [...existingAttachments, ...urls],
+          })
+          .eq("id", paymentId)
+          .eq("customer_id", customerId);
 
         if (attachmentUpdateError) {
           throw attachmentUpdateError;
@@ -1097,6 +1663,38 @@ export default function CustomerFinancePage() {
       setSaving(false);
     }
   }
+
+  // ---- helpers for allocation panel ----
+
+  function getOrderAvailable(
+    orderId: string,
+    sourceType: "payment" | "marketing",
+    sourceId: string
+  ) {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return 0;
+
+    const totalAllocated = orderAllocationMap[orderId] || 0;
+    const existingForSource =
+      allocations.find((a) => {
+        if (sourceType === "payment") {
+          return a.payment_id === sourceId && a.order_id === orderId;
+        }
+        return a.marketing_id === sourceId && a.order_id === orderId;
+      })?.amount || 0;
+    const allocatedByOthers = totalAllocated - existingForSource;
+
+    return Math.max(0, Number(order.invoice_total || 0) - allocatedByOthers);
+  }
+
+  function getDraftTotal() {
+    return Object.values(allocationDrafts).reduce(
+      (sum, val) => sum + Number(normalizeNumber(val) || 0),
+      0
+    );
+  }
+
+  // ---- render ----
 
   if (loading) {
     return (
@@ -1137,7 +1735,14 @@ export default function CustomerFinancePage() {
             grid-template-columns: 1fr !important;
           }
         }
+        @media (max-width: 900px) {
+          .finance-summary-grid-2 {
+            grid-template-columns: 1fr !important;
+          }
+        }
       `}</style>
+
+      {/* ---- sticky header + summary ---- */}
       <div
         style={{
           position: "sticky",
@@ -1152,140 +1757,92 @@ export default function CustomerFinancePage() {
           borderBottom: "1px solid #e2e8f0",
           boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
         }}
-       >
+      >
         <div style={{ marginBottom: 14 }}>
           <PageHeader
             title={`وضعیت مالی ${customer.name}`}
             subtitle={customer.province || "استان ثبت نشده"}
             action={
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => router.push("/finance")}
-            >
-              <ArrowRight size={16} />
-              برگشت
-            </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => router.push("/finance")}
+              >
+                <ArrowRight size={16} />
+                برگشت
+              </button>
             }
           />
         </div>
 
+        {/* ردیف اول خلاصه */}
         <div
           className="finance-summary-grid"
           style={{
             display: "grid",
-            gridTemplateColumns:
-              "repeat(3, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
             gap: 12,
+            marginBottom: 12,
           }}
         >
-        <div
-          className="panel"
-          style={{
-            padding: "15px 18px",
-            border: "1px solid #e2e8f0",
-            borderRadius: 14,
-            background: "#ffffff",
-            boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
-          }}
-        >
-          <div
-            style={{
-              color: "#64748b",
-              fontSize: 12,
-              fontWeight: 600,
-              marginBottom: 6,
-            }}
-          >
-            مجموع فاکتورها
-          </div>
-          <strong
-            style={{
-              fontSize: 20,
-              fontWeight: 800,
-              color: "#0f172a",
-              direction: "ltr",
-              display: "block",
-            }}
-          >
-            {money(totals.invoices)}
-          </strong>
-        </div>
-
-        <div
-          className="panel"
-          style={{
-            padding: "15px 18px",
-            border: "1px solid #e2e8f0",
-            borderRadius: 14,
-            background: "#ffffff",
-            boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
-          }}
-        >
-          <div
-            style={{
-              color: "#64748b",
-              fontSize: 12,
-              fontWeight: 600,
-              marginBottom: 6,
-            }}
-          >
-            مجموع پرداختی
-          </div>
-          <strong
-            style={{
-              fontSize: 20,
-              fontWeight: 800,
-              color: "#0f172a",
-              direction: "ltr",
-              display: "block",
-            }}
-          >
-            {money(totals.payments)}
-          </strong>
-        </div>
-
-        <div
-          className="panel"
-          style={{
-            padding: "15px 18px",
-            border: "1px solid #e2e8f0",
-            borderRadius: 14,
-            background: "#ffffff",
-            boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
-          }}
-        >
-          <div
-            style={{
-              color: "#64748b",
-              fontSize: 12,
-              fontWeight: 600,
-              marginBottom: 6,
-            }}
-          >
-            مانده حساب
-          </div>
-          <strong
-            style={{
-              fontSize: 20,
-              fontWeight: 800,
-              color: totals.balance > 0
+          <SummaryCard
+            label="مجموع فاکتورها"
+            value={money(totals.invoices)}
+            color="#0f172a"
+          />
+          <SummaryCard
+            label="مجموع پرداختی"
+            value={money(totals.payments)}
+            color="#0f172a"
+          />
+          <SummaryCard
+            label="مانده حساب"
+            value={
+              (totals.balance > 0 ? "- " : totals.balance < 0 ? "+ " : "") +
+              money(Math.abs(totals.balance))
+            }
+            color={
+              totals.balance > 0
                 ? "#dc2626"
                 : totals.balance < 0
                 ? "#16a34a"
-                : "#475569",
-              direction: "ltr",
-              display: "block",
-              marginTop: 6,
-            }}
-          >
-            {totals.balance > 0 ? "- " : totals.balance < 0 ? "+ " : ""}
-            {money(Math.abs(totals.balance))}
-          </strong>
+                : "#475569"
+            }
+          />
+        </div>
+
+        {/* ردیف دوم خلاصه — عطف‌ها */}
+        <div
+          className="finance-summary-grid-2"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 12,
+          }}
+        >
+          <SummaryCard
+            label="عطف‌شده به فاکتورها"
+            value={money(totals.totalAllocated)}
+            color="#2563eb"
+          />
+          <SummaryCard
+            label="پرداختی عطف‌نشده"
+            value={money(totals.unallocated)}
+            color={
+              totals.unallocated > 0 ? "#f59e0b" : "#475569"
+            }
+          />
+          <SummaryCard
+            label="مانده واقعی فاکتورها"
+            value={money(totals.invoiceRemaining)}
+            color={
+              totals.invoiceRemaining > 0 ? "#dc2626" : "#16a34a"
+            }
+          />
         </div>
       </div>
-      </div>
 
+      {/* ---- payment form ---- */}
       <form
         id="payment-form"
         className="panel"
@@ -1309,15 +1866,11 @@ export default function CustomerFinancePage() {
               className="select"
               value={paymentType}
               onChange={(event) =>
-                setPaymentType(
-                  event.target.value as PaymentType
-                )
+                setPaymentType(event.target.value as PaymentType)
               }
             >
               <option value="cash">نقدی</option>
-              <option value="bank_transfer">
-                واریز بانکی
-              </option>
+              <option value="bank_transfer">واریز بانکی</option>
               <option value="pos">پوز</option>
               <option value="check">چک</option>
             </select>
@@ -1351,9 +1904,7 @@ export default function CustomerFinancePage() {
                 <input
                   className="input"
                   value={bankName}
-                  onChange={(event) =>
-                    setBankName(event.target.value)
-                  }
+                  onChange={(event) => setBankName(event.target.value)}
                 />
               </div>
 
@@ -1363,9 +1914,7 @@ export default function CustomerFinancePage() {
                   className="input"
                   value={destinationAccount}
                   onChange={(event) =>
-                    setDestinationAccount(
-                      event.target.value
-                    )
+                    setDestinationAccount(event.target.value)
                   }
                 />
               </div>
@@ -1458,15 +2007,9 @@ export default function CustomerFinancePage() {
                     setCheckStatus(event.target.value)
                   }
                 >
-                  <option value="received">
-                    دریافت شده
-                  </option>
-                  <option value="cleared">
-                    وصول شده
-                  </option>
-                  <option value="returned">
-                    برگشتی
-                  </option>
+                  <option value="not_due">عدم سررسید</option>
+                  <option value="due">عدم وصول</option>
+                  <option value="cleared">وصول شده</option>
                 </select>
               </div>
             </>
@@ -1524,7 +2067,10 @@ export default function CustomerFinancePage() {
                         minWidth: 0,
                       }}
                     >
-                      <Paperclip size={14} style={{ verticalAlign: "middle", marginLeft: 6 }} />
+                      <Paperclip
+                        size={14}
+                        style={{ verticalAlign: "middle", marginLeft: 6 }}
+                      />
                       سند {toPersianDigits(index + 1)}
                     </a>
 
@@ -1596,6 +2142,183 @@ export default function CustomerFinancePage() {
         </div>
       </form>
 
+      {/* ---- order settlement table ---- */}
+      <div
+        className="panel"
+        style={{
+          marginTop: 16,
+          border: "1px solid #e2e8f0",
+          borderRadius: 16,
+          boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 10,
+            padding: "0 0 10px",
+            borderBottom: "1px solid #f1f5f9",
+          }}
+        >
+          <h3 style={{ margin: 0 }}>وضعیت تسویه فاکتورها</h3>
+          <div style={{ color: "#64748b", fontSize: 12 }}>
+            {toPersianDigits(orderSettlements.length)} سفارش تحویل‌شده
+          </div>
+        </div>
+
+        <div style={{ width: "100%", overflowX: "auto" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+            }}
+          >
+            <thead>
+              <tr style={{ background: "#fbfdff" }}>
+                <Th>شماره سفارش</Th>
+                <Th>تاریخ تحویل</Th>
+                <Th>موعد تسویه</Th>
+                <Th>مبلغ فاکتور</Th>
+                <Th>پرداخت‌شده</Th>
+                <Th>مانده</Th>
+                <Th>پیشرفت تسویه</Th>
+                <Th>وضعیت</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {orderSettlements.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    style={{ textAlign: "center", padding: 30 }}
+                  >
+                    سفارش تحویل‌شده‌ای وجود ندارد.
+                  </td>
+                </tr>
+              ) : (
+                orderSettlements.map((order) => {
+                  const meta = SETTLEMENT_META[order.status];
+                  return (
+                    <tr
+                      key={order.id}
+                      style={{ borderBottom: "1px solid #f1f5f9" }}
+                    >
+                      <td style={{ padding: "10px", fontWeight: 600 }}>
+                        {toPersianDigits(order.order_number)}
+                      </td>
+                      <td style={{ padding: "10px" }}>{faDate(order.delivery_date)}</td>
+                      <td style={{ padding: "10px" }}>
+                        {faDate(
+                          addDaysToJalaliString(
+                            order.delivery_date,
+                            Number(customer?.settlement_days || 0)
+                          )
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 700,
+                          direction: "ltr",
+                          textAlign: "right",
+                          color: "#b91c1c",
+                        }}
+                      >
+                        {money(order.invoice_total)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 700,
+                          direction: "ltr",
+                          textAlign: "right",
+                          color: "#15803d",
+                        }}
+                      >
+                        {money(order.paid)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 700,
+                          direction: "ltr",
+                          textAlign: "right",
+                          color:
+                            order.remaining > 0
+                              ? "#dc2626"
+                              : "#16a34a",
+                        }}
+                      >
+                        {money(order.remaining)}
+                      </td>
+                      <td style={{ padding: "10px", minWidth: 120 }}>
+                        <div
+                          style={{
+                            width: "100%",
+                            height: 8,
+                            background: "#f1f5f9",
+                            borderRadius: 4,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${order.progress}%`,
+                              height: "100%",
+                              background:
+                                order.status === "settled"
+                                  ? "#22c55e"
+                                  : order.status === "partial"
+                                  ? "#f59e0b"
+                                  : "#ef4444",
+                              borderRadius: 4,
+                              transition: "width 0.3s ease",
+                            }}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#64748b",
+                            marginTop: 3,
+                          }}
+                        >
+                          {toPersianDigits(
+                            Math.round(order.progress)
+                          )}
+                          ٪
+                        </div>
+                      </td>
+                      <td style={{ padding: "10px" }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "4px 10px",
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            background: meta.background,
+                            color: meta.color,
+                          }}
+                        >
+                          {meta.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ---- ledger table ---- */}
       <div
         className="panel"
         style={{
@@ -1615,21 +2338,14 @@ export default function CustomerFinancePage() {
             marginBottom: 10,
           }}
         >
-          <h3 style={{ margin: 0 }}>
-            گردش حساب مشتری
-          </h3>
+          <h3 style={{ margin: 0 }}>گردش حساب مشتری</h3>
           <div style={{ color: "#64748b", fontSize: 12 }}>
             نمایش {toPersianDigits(filteredLedger.length)} سند از{" "}
             {toPersianDigits(ledger.length)}
           </div>
         </div>
 
-        <div
-          style={{
-            width: "100%",
-            overflowX: "auto",
-          }}
-        >
+        <div style={{ width: "100%", overflowX: "auto" }}>
           <table
             style={{
               width: "100%",
@@ -1639,79 +2355,19 @@ export default function CustomerFinancePage() {
           >
             <thead>
               <tr style={{ background: "#fbfdff" }}>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  شماره سند
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  نوع سند
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  مبلغ
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  تاریخ دریافت
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  وضعیت
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  عملیات
-                </th>
-                <th
-                  style={{
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "12px 10px",
-                  }}
-                >
-                  توضیحات
-                </th>
+                <Th>شماره سند</Th>
+                <Th>نوع سند</Th>
+                <Th>مبلغ</Th>
+                <Th>تاریخ تحویل سفارش</Th>
+                <Th>موعد تسویه فاکتور</Th>
+                <Th>وضعیت</Th>
+                <Th>عملیات</Th>
+                <Th>توضیحات</Th>
               </tr>
 
+              {/* ---- filter row (fixed alignment) ---- */}
               <tr style={{ background: "#f8fafc" }}>
+                <th style={{ padding: 6 }} />
                 <th style={{ padding: 6 }}>
                   <select
                     className="select"
@@ -1727,7 +2383,6 @@ export default function CustomerFinancePage() {
                     <option value="مارکتینگ">مارکتینگ</option>
                   </select>
                 </th>
-
                 <th style={{ padding: 6 }}>
                   <input
                     className="input"
@@ -1740,7 +2395,6 @@ export default function CustomerFinancePage() {
                     style={{ width: "100%", fontSize: 12 }}
                   />
                 </th>
-
                 <th style={{ padding: 6 }}>
                   <input
                     className="input"
@@ -1752,7 +2406,7 @@ export default function CustomerFinancePage() {
                     style={{ width: "100%", fontSize: 12 }}
                   />
                 </th>
-
+                <th style={{ padding: 6 }} />
                 <th style={{ padding: 6 }}>
                   <select
                     className="select"
@@ -1764,11 +2418,10 @@ export default function CustomerFinancePage() {
                   >
                     <option value="">همه</option>
                     <option value="not_due">عدم سررسید</option>
-                    <option value="due">سررسید</option>
+                    <option value="due">عدم وصول </option>
                     <option value="cleared">وصول</option>
                   </select>
                 </th>
-
                 <th style={{ padding: 6 }}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <select
@@ -1785,7 +2438,6 @@ export default function CustomerFinancePage() {
                       <option value="pos">پوز</option>
                       <option value="check">چک</option>
                     </select>
-
                     <button
                       type="button"
                       className="btn btn-secondary btn-small"
@@ -1796,6 +2448,7 @@ export default function CustomerFinancePage() {
                     </button>
                   </div>
                 </th>
+                <th style={{ padding: 6 }} />
               </tr>
             </thead>
 
@@ -1803,7 +2456,7 @@ export default function CustomerFinancePage() {
               {filteredLedger.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     style={{
                       textAlign: "center",
                       padding: 30,
@@ -1813,76 +2466,85 @@ export default function CustomerFinancePage() {
                   </td>
                 </tr>
               ) : (
-                filteredLedger.map((row) => (
-                  <tr
-                    key={row.id}
-                    style={{}}
-                  >
-                    <td>{toPersianDigits(row.documentNumber || "-")}</td>
+                filteredLedger.flatMap((row) => {
+                  const rows: ReactElement[] = [];
 
-                    <td>
-                      {row.documentType}
-                      {row.paymentType
-                        ? ` - ${paymentLabels[row.paymentType]}`
-                        : ""}
-                    </td>
+                  // ---- main row ----
+                  rows.push(
+                    <tr key={row.id}>
+                      <td style={{ padding: "10px" }}>
+                        {toPersianDigits(row.documentNumber || "-")}
+                      </td>
 
-                    <td
-                      style={{
-                        fontWeight: 800,
-                        color:
-                          row.documentType === "سفارش"
-                            ? "#b91c1c"
-                            : "#15803d",
-                        direction: "ltr",
-                        textAlign: "right",
-                      }}
-                    >
-                      {row.documentType === "سفارش" ? "- " : "+ "}
-                      {money(row.amount)}
-                    </td>
+                      <td style={{ padding: "10px" }}>
+                        {row.documentType}
+                        {row.paymentType
+                          ? ` - ${paymentLabels[row.paymentType]}`
+                          : ""}
+                      </td>
 
-                    <td>{faDate(row.date)}</td>
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 800,
+                          color:
+                            row.documentType === "سفارش"
+                              ? "#b91c1c"
+                              : "#15803d",
+                          direction: "ltr",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.documentType === "سفارش" ? "- " : "+ "}
+                        {money(row.amount)}
+                      </td>
 
-                    <td>
-                      {row.paymentType === "check" && row.payment ? (
-                        <select
-                          className="select"
-                          value={normalizedCheckStatus(
-                            row.payment.check_status
-                          )}
-                          onChange={(event) =>
-                            updateCheckStatus(
-                              row.payment!.id,
-                              event.target.value as
-                                | "not_due"
-                                | "due"
-                                | "cleared"
-                            )
-                          }
-                          style={{
-                            minWidth: 118,
-                            background: getCheckStatusMeta(
+                      <td style={{ padding: "10px" }}>
+                        {row.documentType === "سفارش" ? faDate(row.deliveryDate || null) : <span style={{ color: "#94a3b8" }}>—</span>}
+                      </td>
+
+                      <td style={{ padding: "10px" }}>
+                        {row.documentType === "سفارش" ? faDate(row.settlementDueDate || null) : <span style={{ color: "#94a3b8" }}>—</span>}
+                      </td>
+
+                      <td style={{ padding: "10px" }}>
+                        {row.paymentType === "check" && row.payment ? (
+                          <select
+                            className="select"
+                            value={normalizedCheckStatus(
                               row.payment.check_status
-                            ).background,
-                            color: getCheckStatusMeta(
-                              row.payment.check_status
-                            ).color,
-                            fontWeight: 700,
-                          }}
-                        >
-                          <option value="not_due">عدم سررسید</option>
-                          <option value="due">سررسید</option>
-                          <option value="cleared">وصول</option>
-                        </select>
-                      ) : (
-                        <span style={{ color: "#94a3b8" }}>—</span>
-                      )}
-                    </td>
+                            )}
+                            onChange={(event) =>
+                              updateCheckStatus(
+                                row.payment!.id,
+                                event.target.value as
+                                  | "not_due"
+                                  | "due"
+                                  | "cleared"
+                              )
+                            }
+                            style={{
+                              minWidth: 118,
+                              background: getCheckStatusMeta(
+                                row.payment.check_status
+                              ).background,
+                              color: getCheckStatusMeta(
+                                row.payment.check_status
+                              ).color,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <option value="not_due">عدم سررسید</option>
+                            <option value="due">عدم وصول </option>
+                            <option value="cleared">وصول</option>
+                          </select>
+                        ) : (
+                          <span style={{ color: "#94a3b8" }}>—</span>
+                        )}
+                      </td>
 
-                    <td>
-                      {row.documentType === "سند پرداختی" ? (
-                        <>
+                      <td style={{ padding: "10px" }}>
+                        {row.documentType === "سند پرداختی" ? (
                           <div
                             style={{
                               display: "flex",
@@ -1898,6 +2560,62 @@ export default function CustomerFinancePage() {
                               disabled={saving}
                             >
                               ویرایش
+                            </button>
+
+                            {/* دکمه عطف به فاکتور */}
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-small"
+                              onClick={() => expandRow(row)}
+                              disabled={saving}
+                              title="عطف پرداخت به فاکتورها"
+                              style={{
+                                color: "#2563eb",
+                                borderColor:
+                                  expandedSource?.type === "payment" &&
+                                  expandedSource.id === row.payment?.id
+                                    ? "#2563eb"
+                                    : undefined,
+                                background:
+                                  expandedSource?.type === "payment" &&
+                                  expandedSource.id === row.payment?.id
+                                    ? "#eff6ff"
+                                    : undefined,
+                              }}
+                            >
+                              <Link2 size={14} />
+                              عطف
+                              {row.payment &&
+                                (paymentAllocationMap[row.payment.id] || 0) > 0 && (
+                                  <span
+                                    style={{
+                                      marginRight: 4,
+                                      fontSize: 10,
+                                      color: "#2563eb",
+                                      fontWeight: 700,
+                                      background: "#eff6ff",
+                                      padding: "1px 5px",
+                                      borderRadius: 4,
+                                    }}
+                                  >
+                                    {toPersianDigits(
+                                      new Intl.NumberFormat("fa-IR").format(
+                                        paymentAllocationMap[row.payment.id]
+                                      )
+                                    )} ر
+                                  </span>
+                                )}
+                              <ChevronDown
+                                size={12}
+                                style={{
+                                  transition: "transform 0.2s",
+                                  transform:
+                                    expandedSource?.type === "payment" &&
+                                    expandedSource.id === row.payment?.id
+                                      ? "rotate(180deg)"
+                                      : "none",
+                                }}
+                              />
                             </button>
 
                             {row.payment?.attachment_urls?.length ? (
@@ -1921,29 +2639,522 @@ export default function CustomerFinancePage() {
                               onClick={() => deletePayment(row)}
                               disabled={saving}
                               title="حذف سند پرداختی"
-                              style={{
-                                color: "#b91c1c",
-                              }}
+                              style={{ color: "#b91c1c" }}
                             >
                               <Trash2 size={14} />
                               حذف
                             </button>
                           </div>
-                        </>
-                      ) : (
-                        <span style={{ color: "#94a3b8" }}>—</span>
-                      )}
-                    </td>
+                        ) : row.documentType === "مارکتینگ" && row.marketingId ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {/* دکمه عطف مارکتینگ به فاکتور */}
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-small"
+                              onClick={() => expandRow(row)}
+                              disabled={saving}
+                              title="عطف هزینه مارکتینگ به فاکتورها"
+                              style={{
+                                color: "#7c3aed",
+                                borderColor:
+                                  expandedSource?.type === "marketing" &&
+                                  expandedSource.id === row.marketingId
+                                    ? "#7c3aed"
+                                    : undefined,
+                                background:
+                                  expandedSource?.type === "marketing" &&
+                                  expandedSource.id === row.marketingId
+                                    ? "#f5f3ff"
+                                    : undefined,
+                              }}
+                            >
+                              <Link2 size={14} />
+                              عطف
+                              {(marketingAllocationMap[row.marketingId] || 0) > 0 && (
+                                <span
+                                  style={{
+                                    marginRight: 4,
+                                    fontSize: 10,
+                                    color: "#7c3aed",
+                                    fontWeight: 700,
+                                    background: "#f5f3ff",
+                                    padding: "1px 5px",
+                                    borderRadius: 4,
+                                  }}
+                                >
+                                  {toPersianDigits(
+                                    new Intl.NumberFormat("fa-IR").format(
+                                      marketingAllocationMap[row.marketingId]
+                                    )
+                                  )} ر
+                                </span>
+                              )}
+                              <ChevronDown
+                                size={12}
+                                style={{
+                                  transition: "transform 0.2s",
+                                  transform:
+                                    expandedSource?.type === "marketing" &&
+                                    expandedSource.id === row.marketingId
+                                      ? "rotate(180deg)"
+                                      : "none",
+                                }}
+                              />
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ color: "#94a3b8" }}>—</span>
+                        )}
+                      </td>
 
-                    <td>{row.description || "—"}</td>
-                  </tr>
-                ))
+                      <td style={{ padding: "10px" }}>
+                        {row.description || "—"}
+                      </td>
+                    </tr>
+                  );
+
+                  // ---- expanded allocation panel ----
+                  const source = getSourceInfo(row);
+                  const isExpanded =
+                    source &&
+                    expandedSource &&
+                    expandedSource.type === source.type &&
+                    expandedSource.id === source.id;
+
+                  if (source && isExpanded) {
+                    const sourceAmount = source.amount;
+                    const allocatedAmount = getSourceAllocated(source.type, source.id);
+                    const draftTotal = getDraftTotal();
+                    const draftUnallocated = sourceAmount - draftTotal;
+                    const isPayment = source.type === "payment";
+                    const sourceLabel = isPayment ? "پرداخت" : "هزینه مارکتینگ";
+                    const headerColor = isPayment ? "#2563eb" : "#7c3aed";
+                    const headerBg = isPayment ? "#f0f9ff" : "#f5f3ff";
+                    const headerText = isPayment ? "#1e40af" : "#5b21b6";
+
+                    // سفارش‌هایی که قابل عطف هستند (مانده دارند یا عطف موجود دارند)
+                    const allocatableOrders = orders.filter((order) => {
+                      const available = getOrderAvailable(
+                        order.id,
+                        source.type,
+                        source.id
+                      );
+                      const hasDraft =
+                        Number(normalizeNumber(allocationDrafts[order.id] || "")) > 0;
+                      return available > 0 || hasDraft;
+                    });
+
+                    rows.push(
+                      <tr
+                        key={`${row.id}-alloc`}
+                        style={{ background: "#f8fafc" }}
+                      >
+                        <td colSpan={8} style={{ padding: "12px 16px" }}>
+                          <div
+                            style={{
+                              border: "1px solid #e2e8f0",
+                              borderRadius: 12,
+                              background: "#ffffff",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {/* هدر پنل */}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                flexWrap: "wrap",
+                                padding: "12px 16px",
+                                background: headerBg,
+                                borderBottom: "1px solid #e2e8f0",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <Link2 size={16} style={{ color: headerColor }} />
+                                <strong style={{ color: headerText }}>
+                                  عطف {sourceLabel} به فاکتورها
+                                </strong>
+                                <span
+                                  style={{
+                                    color: "#64748b",
+                                    fontSize: 12,
+                                  }}
+                                >
+                                  مبلغ {sourceLabel}: {money(sourceAmount)}
+                                </span>
+                                <span
+                                  style={{
+                                    color: "#2563eb",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  عطف‌شده: {money(allocatedAmount)}
+                                </span>
+                                <span
+                                  style={{
+                                    color: draftUnallocated < 0 ? "#dc2626" : "#f59e0b",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  مانده قابل عطف: {money(Math.abs(draftUnallocated))}
+                                  {draftUnallocated < 0 && " (بیشتر از مبلغ!)"}
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-small"
+                                onClick={() => autoAllocate(row)}
+                                disabled={savingAllocations}
+                                title="توزیع خودکار بر اساس قدیمی‌ترین فاکتورها (FIFO)"
+                                style={{ color: headerColor }}
+                              >
+                                <Zap size={14} />
+                                عطف خودکار
+                              </button>
+                            </div>
+
+                            {/* جدول عطف */}
+                            {allocatableOrders.length === 0 ? (
+                              <div
+                                style={{
+                                  padding: 24,
+                                  textAlign: "center",
+                                  color: "#64748b",
+                                  fontSize: 13,
+                                }}
+                              >
+                                سفارش تحویل‌شده‌ای با مانده برای عطف وجود ندارد.
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  overflowX: "auto",
+                                }}
+                              >
+                                <table
+                                  style={{
+                                    width: "100%",
+                                    borderCollapse: "separate",
+                                    borderSpacing: 0,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  <thead>
+                                    <tr
+                                      style={{
+                                        background: "#f8fafc",
+                                        borderBottom: "1px solid #e2e8f0",
+                                      }}
+                                    >
+                                      <Th>شماره سفارش</Th>
+                                      <Th>مبلغ فاکتور</Th>
+                                      <Th>عطف‌شده (سایر پرداخت‌ها)</Th>
+                                      <Th>مانده قابل عطف</Th>
+                                      <Th>مبلغ عطف این پرداخت</Th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {allocatableOrders.map((order) => {
+                                      const available =
+                                        getOrderAvailable(
+                                          order.id,
+                                          source.type,
+                                          source.id
+                                        );
+                                      const draftVal =
+                                        allocationDrafts[order.id] || "";
+                                      const draftNum = Number(
+                                        normalizeNumber(draftVal) || 0
+                                      );
+                                      const exceeds =
+                                        draftNum > available;
+
+                                      return (
+                                        <tr
+                                          key={order.id}
+                                          style={{
+                                            borderBottom: "1px solid #f1f5f9",
+                                          }}
+                                        >
+                                          <td
+                                            style={{
+                                              padding: "8px 10px",
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            {toPersianDigits(
+                                              order.order_number
+                                            )}
+                                          </td>
+                                          <td
+                                            style={{
+                                              padding: "8px 10px",
+                                              direction: "ltr",
+                                              textAlign: "right",
+                                              color: "#475569",
+                                            }}
+                                          >
+                                            {money(order.invoice_total)}
+                                          </td>
+                                          <td
+                                            style={{
+                                              padding: "8px 10px",
+                                              direction: "ltr",
+                                              textAlign: "right",
+                                              color: "#64748b",
+                                            }}
+                                          >
+                                            {money(
+                                              (orderAllocationMap[order.id] || 0) -
+                                                (allocations.find(
+                                                  (a) =>
+                                                    ((source.type === "payment" &&
+                                                      a.payment_id === source.id) ||
+                                                      (source.type === "marketing" &&
+                                                        a.marketing_id === source.id)) &&
+                                                    a.order_id === order.id
+                                                )?.amount || 0)
+                                            )}
+                                          </td>
+                                          <td
+                                            style={{
+                                              padding: "8px 10px",
+                                              direction: "ltr",
+                                              textAlign: "right",
+                                              fontWeight: 700,
+                                              color:
+                                                available > 0
+                                                  ? "#15803d"
+                                                  : "#94a3b8",
+                                            }}
+                                          >
+                                            {money(available)}
+                                          </td>
+                                          <td style={{ padding: "8px 10px" }}>
+                                            <input
+                                              className="input"
+                                              inputMode="numeric"
+                                              value={draftVal}
+                                              onChange={(event) =>
+                                                setAllocationDrafts(
+                                                  (prev) => ({
+                                                    ...prev,
+                                                    [order.id]:
+                                                      formatInputMoney(
+                                                        event.target.value
+                                                      ),
+                                                  })
+                                                )
+                                              }
+                                              placeholder="۰"
+                                              style={{
+                                                width: 140,
+                                                fontSize: 13,
+                                                direction: "ltr",
+                                                textAlign: "right",
+                                                borderColor: exceeds
+                                                  ? "#ef4444"
+                                                  : draftNum > 0
+                                                  ? "#22c55e"
+                                                  : undefined,
+                                                background: exceeds
+                                                  ? "#fef2f2"
+                                                  : undefined,
+                                              }}
+                                            />
+                                            {exceeds && (
+                                              <div
+                                                style={{
+                                                  fontSize: 11,
+                                                  color: "#ef4444",
+                                                  marginTop: 2,
+                                                }}
+                                              >
+                                                بیشتر از مانده!
+                                              </div>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+
+                            {/* دکمه‌های پنل */}
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                padding: "12px 16px",
+                                borderTop: "1px solid #f1f5f9",
+                                background: "#f8fafc",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={() => saveAllocations(row)}
+                                disabled={
+                                  savingAllocations ||
+                                  draftUnallocated < 0
+                                }
+                                style={{
+                                  background:
+                                    draftUnallocated < 0
+                                      ? "#94a3b8"
+                                      : undefined,
+                                }}
+                              >
+                                <Save size={16} />
+                                {savingAllocations
+                                  ? "در حال ذخیره..."
+                                  : "ذخیره عطف‌ها"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                  setExpandedSource(null);
+                                  setAllocationDrafts({});
+                                }}
+                                disabled={savingAllocations}
+                              >
+                                انصراف
+                              </button>
+                              <div
+                                style={{
+                                  marginRight: "auto",
+                                  display: "flex",
+                                  gap: 16,
+                                  alignItems: "center",
+                                  fontSize: 12,
+                                }}
+                              >
+                                <span style={{ color: "#64748b" }}>
+                                  جمع عطف:{" "}
+                                  <strong
+                                    style={{
+                                      color:
+                                        draftUnallocated < 0
+                                          ? "#dc2626"
+                                          : "#2563eb",
+                                    }}
+                                  >
+                                    {money(draftTotal)}
+                                  </strong>
+                                </span>
+                                <span style={{ color: "#64748b" }}>
+                                  مانده {sourceLabel}:{" "}
+                                  <strong
+                                    style={{
+                                      color:
+                                        draftUnallocated < 0
+                                          ? "#dc2626"
+                                          : "#f59e0b",
+                                    }}
+                                  >
+                                    {money(Math.abs(draftUnallocated))}
+                                  </strong>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return rows;
+                })
               )}
-
             </tbody>
           </table>
         </div>
       </div>
     </AppShell>
+  );
+}
+
+// ---- helper components ----
+
+function SummaryCard({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color: string;
+}) {
+  return (
+    <div
+      className="panel"
+      style={{
+        padding: "15px 18px",
+        border: "1px solid #e2e8f0",
+        borderRadius: 14,
+        background: "#ffffff",
+        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
+      }}
+    >
+      <div
+        style={{
+          color: "#64748b",
+          fontSize: 12,
+          fontWeight: 600,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <strong
+        style={{
+          fontSize: 20,
+          fontWeight: 800,
+          color,
+          direction: "ltr",
+          display: "block",
+        }}
+      >
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function Th({ children }: { children: React.ReactNode }) {
+  return (
+    <th
+      style={{
+        color: "#475569",
+        fontSize: 12,
+        fontWeight: 700,
+        padding: "12px 10px",
+      }}
+    >
+      {children}
+    </th>
   );
 }

@@ -8,9 +8,8 @@ import {
   Eye,
   Plus,
   Search,
-  X,
   Pencil,
-  Trash2,
+  X,
 } from "lucide-react";
 
 import AppShell from "@/components/AppShell";
@@ -77,6 +76,8 @@ type Order = {
   customer_name?: string;
   visitor?: string | null;
   status: string;
+  cancelled_from?: string | null;
+  cancelled_at?: string | null;
   invoice_total?: number;
   created_at: string;
   send_date?: string | null;
@@ -146,7 +147,23 @@ function formatDate(value: string) {
 /* وضعیت سفارش */
 /* ------------------------------------------------ */
 
-function statusInfo(status: string) {
+function statusInfo(status: string, cancelledFrom?: string | null) {
+  if (status === "cancelled") {
+    const originLabel =
+      cancelledFrom === "pending"
+        ? "در انتظار تایید"
+        : cancelledFrom === "approved"
+        ? "تایید شده"
+        : cancelledFrom === "delivered"
+        ? "تحویل داده شد"
+        : cancelledFrom || "نامشخص";
+
+    return {
+      label: `ابطال (${originLabel})`,
+      className: "danger",
+    };
+  }
+
   switch (status) {
     case "pending":
       return {
@@ -164,12 +181,6 @@ function statusInfo(status: string) {
       return {
         label: "تحویل شده",
         className: "info",
-      };
-
-    case "cancelled":
-      return {
-        label: "باطل شده",
-        className: "danger",
       };
 
     default:
@@ -301,7 +312,18 @@ export default function OrdersPage() {
 
    console.log("FULL DATA:", data);
 
-setOrders((data || []) as Order[]);
+const visibleOrders = (data || []).filter((order: any) => {
+  if (order.status === "pending" || order.status === "approved") {
+    return true;
+  }
+
+  return (
+    order.status === "cancelled" &&
+    ["pending", "approved"].includes(order.cancelled_from || "")
+  );
+});
+
+setOrders(visibleOrders as Order[]);
   }
 
   /* ------------------------------------------------ */
@@ -681,13 +703,23 @@ setOrders((data || []) as Order[]);
   }
 
   /* ------------------------------------------------ */
-  /* حذف سفارش */
-/* ------------------------------------------------ */
+  /* ابطال سفارش - بدون حذف رکورد */
+  /* ------------------------------------------------ */
 
-  async function deleteOrder(id: string) {
+  async function cancelOrder(order: Order) {
+    if (!["pending", "approved"].includes(order.status)) {
+      alert("این سفارش در این مرحله قابل ابطال از صفحه سفارشات نیست.");
+      return;
+    }
+
+    const statusLabel =
+      order.status === "pending"
+        ? "در انتظار تایید"
+        : "تایید شده";
+
     if (
       !confirm(
-        "آیا از حذف کامل این سفارش مطمئن هستید؟"
+        `سفارش از مرحله «${statusLabel}» ابطال شود؟\n\nسفارش حذف نمی‌شود و به صورت «ابطال (${statusLabel})» باقی می‌ماند.`
       )
     ) {
       return;
@@ -695,36 +727,38 @@ setOrders((data || []) as Order[]);
 
     const { error } = await supabase
       .from("orders")
-      .delete()
-      .eq("id", id);
+      .update({
+        status: "cancelled",
+        cancelled_from: order.status,
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq("id", order.id)
+      .eq("status", order.status);
 
     if (error) {
       console.error(error);
-      alert(
-        `خطا در حذف سفارش: ${error.message}`
-      );
+      alert(`خطا در ابطال سفارش: ${error.message}`);
       return;
     }
 
-    setDetail(null);
+    if (detail?.id === order.id) {
+      setDetail({
+        ...detail,
+        status: "cancelled",
+        cancelled_from: order.status,
+        cancelled_at: new Date().toISOString(),
+      });
+    }
 
     await loadOrders();
   }
+
   /* ------------------------------------------------ */
   /* ستون‌های جدول سفارشات با فیلتر و مرتب‌سازی */
   /* ------------------------------------------------ */
 
-  function orderRowClass(row: Order) {
-    switch (row.status) {
-      case "pending":
-        return "order-row-pending";
-      case "approved":
-        return "order-row-approved";
-      case "delivered":
-        return "order-row-delivered";
-      default:
-        return "";
-    }
+  function orderRowClass(_row: Order) {
+    return "";
   }
 
   const orderTableColumns: DataTableColumn<Order>[] = [
@@ -805,34 +839,74 @@ setOrders((data || []) as Order[]);
       filterable: true,
       searchable: true,
       sortable: true,
-      accessor: (row) => statusInfo(row.status).label,
+      accessor: (row) => statusInfo(row.status, row.cancelled_from).label,
       render: (_value, row) => {
-        const status = statusInfo(row.status);
+        const status = statusInfo(row.status, row.cancelled_from);
+
+        const background =
+          row.status === "pending"
+            ? "#fffbe8"
+            : row.status === "approved"
+            ? "#fed7aa"
+            : row.status === "delivered"
+            ? "#dcfce7"
+            : row.status === "cancelled"
+            ? "#fee2e2"
+            : "#f8fafc";
+
+        const foreground =
+          row.status === "pending"
+            ? "#92400e"
+            : row.status === "approved"
+            ? "#9a3412"
+            : row.status === "delivered"
+            ? "#166534"
+            : row.status === "cancelled"
+            ? "#991b1b"
+            : "#475569";
 
         return (
-          <span className={`badge ${status.className}`}>
+          <div
+            style={{
+              width: "calc(100% + 12px)",
+              minHeight: "100%",
+              margin: "-8px -6px",
+              padding: "8px 6px",
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background,
+              color: foreground,
+              fontWeight: 700,
+              textAlign: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
             {status.label}
-          </span>
+          </div>
         );
       },
     },
     {
       key: "actions",
       title: "عملیات",
-      width: 90,
+      width: 120,
       filterable: false,
       searchable: false,
       sortable: false,
       accessor: () => "",
       render: (_value, row) => (
-        <button
-          type="button"
-          className="btn btn-secondary btn-small"
-          onClick={() => router.push(`/orders/${row.id}`)}
-        >
-          <Eye size={15} />
-          مشاهده
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={() => router.push(`/orders/${row.id}`)}
+          >
+            <Eye size={15} />
+            مشاهده / ویرایش
+          </button>
+        </div>
       ),
     },
   ];
@@ -846,36 +920,55 @@ setOrders((data || []) as Order[]);
   return (
     <>
       <style jsx global>{`
+        .orders-page-compact {
+          width: 100% !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+          overflow: visible !important;
+        }
+
+        .orders-page-compact .table-wrap {
+          width: 100% !important;
+          max-width: 100% !important;
+          overflow: visible !important;
+        }
+
+        .orders-page-compact .table-wrap,
+        .orders-page-compact .table-wrap > div {
+          overflow: visible !important;
+        }
+
         .orders-page-compact table {
           width: 100% !important;
+          max-width: 100% !important;
           table-layout: fixed !important;
         }
 
         .orders-page-compact th,
         .orders-page-compact td {
-          padding: 8px 6px !important;
-          font-size: 13px !important;
+          padding: 7px 5px !important;
+          font-size: clamp(11px, 0.82vw, 14px) !important;
+          line-height: 1.35 !important;
           white-space: nowrap;
+          box-sizing: border-box !important;
+        }
+
+        .orders-page-compact th {
+          position: relative !important;
+          overflow: visible !important;
+          z-index: 20 !important;
+        }
+
+        .orders-page-compact td {
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
-        .orders-page-compact .table-wrap {
-          width: 100% !important;
-          overflow-x: hidden !important;
-        }
-
-        .order-row-pending td {
-          background: #fffbe8 !important;
-        }
-        .order-row-approved td {
-          background: #fed7aa !important;
-        }
-        .order-row-delivered td {
-          background: #dcfce7 !important;
-        }
-        .order-row-approved:hover td {
-          background: #fdba74 !important;
+        .orders-page-compact th [role="dialog"],
+        .orders-page-compact th [data-radix-popper-content-wrapper],
+        .orders-page-compact th .filter-menu,
+        .orders-page-compact th .filter-dropdown {
+          z-index: 99999 !important;
         }
       `}</style>
       <AppShell>
@@ -1642,17 +1735,11 @@ setOrders((data || []) as Order[]);
                 marginTop: 20,
               }}
             >
-              {detail.status ===
-                "pending" && (
+              {detail.status === "pending" && (
                 <>
                   <button
                     className="btn btn-primary"
-                    onClick={() =>
-                      changeStatus(
-                        detail.id,
-                        "approved"
-                      )
-                    }
+                    onClick={() => changeStatus(detail.id, "approved")}
                   >
                     <Check size={16} />
                     تایید سفارش
@@ -1660,12 +1747,7 @@ setOrders((data || []) as Order[]);
 
                   <button
                     className="btn btn-danger"
-                    onClick={() =>
-                      changeStatus(
-                        detail.id,
-                        "cancelled"
-                      )
-                    }
+                    onClick={() => cancelOrder(detail)}
                   >
                     <X size={16} />
                     ابطال سفارش
@@ -1673,70 +1755,26 @@ setOrders((data || []) as Order[]);
                 </>
               )}
 
-              {detail.status ===
-                "approved" && (
-                <>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() =>
-                      changeStatus(
-                        detail.id,
-                        "delivered"
-                      )
-                    }
-                  >
-                    <Check size={16} />
-                    تایید تحویل کامل
-                  </button>
-
-                  <button
-                    className="btn btn-danger"
-                    onClick={() =>
-                      changeStatus(
-                        detail.id,
-                        "cancelled"
-                      )
-                    }
-                  >
-                    <X size={16} />
-                    ابطال سفارش
-                  </button>
-                </>
+              {detail.status === "approved" && (
+                <button
+                  className="btn btn-danger"
+                  onClick={() => cancelOrder(detail)}
+                >
+                  <X size={16} />
+                  ابطال سفارش
+                </button>
               )}
 
-              {detail.status ===
-                "cancelled" && (
+              {detail.status === "cancelled" && (
                 <span
                   style={{
                     color: "#dc2626",
                     fontWeight: 700,
                   }}
                 >
-                  این سفارش باطل شده است.
+                  {statusInfo(detail.status, detail.cancelled_from).label}
                 </span>
               )}
-
-              {detail.status ===
-                "delivered" && (
-                <span
-                  style={{
-                    color: "#16a34a",
-                    fontWeight: 700,
-                  }}
-                >
-                  این سفارش تحویل شده است.
-                </span>
-              )}
-
-              <button
-                className="btn btn-danger"
-                onClick={() =>
-                  deleteOrder(detail.id)
-                }
-              >
-                <Trash2 size={15} />
-                حذف سفارش
-              </button>
             </div>
           </div>
         </div>

@@ -46,10 +46,110 @@ export default function OrderDetailPage() {
   // تاریخ تحویل سفارش (شمسی در رابط کاربری)
   const [deliveryDate, setDeliveryDate] = useState("");
 
+  // تاریخ ارسال عملیاتی انبار.
+  // این فیلد از send_date مرحله تأیید شروع می‌شود، اما بعد از آن مستقل است.
+  const [warehouseSendDate, setWarehouseSendDate] = useState("");
+
+  // تبدیل تاریخ شمسی انتخاب‌شده در انبار به تاریخ میلادی برای ذخیره در DB.
+  // send_date مرحله تأیید هرگز تغییر نمی‌کند؛ فقط warehouse_send_date تغییر می‌کند.
+  function jalaliToGregorian(jy: number, jm: number, jd: number) {
+    jy -= 979;
+
+    let days =
+      365 * jy +
+      Math.floor(jy / 33) * 8 +
+      Math.floor(((jy % 33) + 3) / 4) +
+      78 +
+      jd +
+      (jm < 7
+        ? (jm - 1) * 31
+        : (jm - 7) * 30 + 186);
+
+    let gy =
+      1600 +
+      400 * Math.floor(days / 146097);
+
+    days %= 146097;
+
+    if (days > 36524) {
+      gy += 100 * Math.floor(--days / 36524);
+      days %= 36524;
+
+      if (days >= 365) {
+        days++;
+      }
+    }
+
+    gy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+
+    if (days > 365) {
+      gy += Math.floor((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+
+    const gd = days + 1;
+
+    const salA = [
+      0,
+      31,
+      ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0)
+        ? 29
+        : 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31,
+    ];
+
+    let gm = 0;
+    let day = gd;
+
+    while (gm < 13 && day > salA[gm]) {
+      day -= salA[gm];
+      gm++;
+    }
+
+    return `${gy}-${String(gm).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
   // نمایش تاریخ تحویل:
   // چون تاریخ در دیتابیس به صورت شمسی ذخیره می‌شود (مثلاً 1405/03/03)
   // نباید با new Date() پردازش شود؛ جاوااسکریپت آن را میلادی فرض می‌کند
   // و باعث تاریخ‌های اشتباه مثل سال‌های ۷۰۰ و ۸۰۰ می‌شود.
+  function formatWarehouseSendDate(value: string | null | undefined) {
+    if (!value) return "-";
+
+    const raw = String(value).trim();
+    const datePart = raw.split(" ")[0];
+    const slashParts = datePart.split("/");
+
+    if (
+      slashParts.length === 3 &&
+      Number(slashParts[0]) >= 1300 &&
+      Number(slashParts[0]) <= 1500
+    ) {
+      return `${slashParts[0]}/${String(slashParts[1]).padStart(2, "0")}/${String(slashParts[2]).padStart(2, "0")}`;
+    }
+
+    const date = new Date(`${datePart}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return raw;
+
+    const jalali = new DateObject({
+      date,
+      calendar: persian,
+      locale: persian_fa,
+    });
+
+    return `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`;
+  }
+
   function formatPersianDate(value: string | null | undefined) {
     if (!value) return "-";
 
@@ -171,6 +271,39 @@ export default function OrderDetailPage() {
       // اگر سفارش هنوز تاریخ تحویلی ندارد، پیش‌فرض روی تاریخ امروز قرار می‌گیرد
       // (فقط برای نمایش؛ تا زمانی که «ذخیره تغییرات» زده نشود چیزی در دیتابیس ثبت نمی‌شود).
       setDeliveryDate(orderData.delivery_date || getTodayJalaliString());
+
+      const originalWarehouseSendDate =
+        orderData.warehouse_send_date || orderData.send_date || null;
+
+      if (originalWarehouseSendDate) {
+        const raw = String(originalWarehouseSendDate).trim();
+        const parts = raw.split(" ")[0].split("/");
+        if (
+          parts.length === 3 &&
+          Number(parts[0]) >= 1300 &&
+          Number(parts[0]) <= 1500
+        ) {
+          setWarehouseSendDate(
+            `${parts[0]}/${String(parts[1]).padStart(2, "0")}/${String(parts[2]).padStart(2, "0")}`
+          );
+        } else {
+          const date = new Date(`${raw.substring(0, 10)}T12:00:00`);
+          if (!Number.isNaN(date.getTime())) {
+            const jalali = new DateObject({
+              date,
+              calendar: persian,
+              locale: persian_fa,
+            });
+            setWarehouseSendDate(
+              `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`
+            );
+          } else {
+            setWarehouseSendDate("");
+          }
+        }
+      } else {
+        setWarehouseSendDate("");
+      }
 
       setEditedItems(finalData.order_items || []);
       await loadDeliveryDocuments();
@@ -410,6 +543,34 @@ export default function OrderDetailPage() {
     if (!deliveryDate) {
       setDeliveryDate(getTodayJalaliString());
     }
+
+    if (!warehouseSendDate) {
+      const original = order.warehouse_send_date || order.send_date || "";
+      const raw = String(original).trim();
+      const parts = raw.split(" ")[0].split("/");
+
+      if (
+        parts.length === 3 &&
+        Number(parts[0]) >= 1300 &&
+        Number(parts[0]) <= 1500
+      ) {
+        setWarehouseSendDate(
+          `${parts[0]}/${String(parts[1]).padStart(2, "0")}/${String(parts[2]).padStart(2, "0")}`
+        );
+      } else if (raw) {
+        const date = new Date(`${raw.substring(0, 10)}T12:00:00`);
+        if (!Number.isNaN(date.getTime())) {
+          const jalali = new DateObject({
+            date,
+            calendar: persian,
+            locale: persian_fa,
+          });
+          setWarehouseSendDate(
+            `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`
+          );
+        }
+      }
+    }
   }
 
   function cancelEditing() {
@@ -420,6 +581,43 @@ export default function OrderDetailPage() {
     setPendingCartons({});
     // در صورت لغو ویرایش، تاریخ نمایشی به آخرین مقدار ذخیره‌شده (یا امروز) برمی‌گردد.
     setDeliveryDate(order.delivery_date || getTodayJalaliString());
+
+    const originalWarehouseSendDate =
+      order.warehouse_send_date || order.send_date || "";
+
+    const rawWarehouseSendDate = String(originalWarehouseSendDate).trim();
+    const warehouseParts =
+      rawWarehouseSendDate.split(" ")[0].split("/");
+
+    if (
+      warehouseParts.length === 3 &&
+      Number(warehouseParts[0]) >= 1300 &&
+      Number(warehouseParts[0]) <= 1500
+    ) {
+      setWarehouseSendDate(
+        `${warehouseParts[0]}/${String(warehouseParts[1]).padStart(2, "0")}/${String(warehouseParts[2]).padStart(2, "0")}`
+      );
+    } else if (rawWarehouseSendDate) {
+      const date = new Date(
+        `${rawWarehouseSendDate.substring(0, 10)}T12:00:00`
+      );
+
+      if (!Number.isNaN(date.getTime())) {
+        const jalali = new DateObject({
+          date,
+          calendar: persian,
+          locale: persian_fa,
+        });
+
+        setWarehouseSendDate(
+          `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`
+        );
+      } else {
+        setWarehouseSendDate("");
+      }
+    } else {
+      setWarehouseSendDate("");
+    }
   }
 
   function openAddProduct() {
@@ -610,6 +808,56 @@ export default function OrderDetailPage() {
 
     setSelectedProductIds({});
     setPendingCartons({});
+  }
+
+  async function cancelOrder() {
+    if (order.status !== "approved" && order.status !== "delivered") {
+      alert("این سفارش در این مرحله قابل ابطال نیست.");
+      return;
+    }
+
+    const statusLabel =
+      order.status === "approved"
+        ? "در حال ارسال"
+        : "تحویل داده شد";
+
+    if (
+      !confirm(
+        `سفارش از مرحله «${statusLabel}» ابطال شود؟\n\nسفارش حذف نمی‌شود و با وضعیت «ابطال (${statusLabel})» باقی می‌ماند.`
+      )
+    ) {
+      return;
+    }
+
+    const cancelledAt = new Date().toISOString();
+
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        status: "cancelled",
+        cancelled_from: order.status,
+        cancelled_at: cancelledAt,
+      })
+      .eq("id", id)
+      .eq("status", order.status);
+
+    if (error) {
+      console.log("CANCEL ORDER ERROR:", error);
+      alert(`خطا در ابطال سفارش: ${error.message}`);
+      return;
+    }
+
+    setIsEditing(false);
+    setSelectedProductIds({});
+    setPendingCartons({});
+    setShowAddProduct(false);
+
+    setOrder({
+      ...order,
+      status: "cancelled",
+      cancelled_from: order.status,
+      cancelled_at: cancelledAt,
+    });
   }
 
   function getStatusLabel(status: any) {
@@ -1064,6 +1312,20 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
       const deliveryDateToSave =
         deliveryDate || getTodayJalaliString();
 
+      const warehouseSendDateToSave =
+        warehouseSendDate
+          ? (() => {
+              const parts = warehouseSendDate.split("/");
+              if (parts.length !== 3) return null;
+
+              return jalaliToGregorian(
+                Number(parts[0]),
+                Number(parts[1]),
+                Number(parts[2])
+              );
+            })()
+          : null;
+
       const { error: orderUpdateError } =
         await supabase
           .from("orders")
@@ -1071,6 +1333,7 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
             status: order.status,
             invoice_total: grandTotal,
             delivery_date: deliveryDateToSave,
+            warehouse_send_date: warehouseSendDateToSave,
           })
           .eq("id", id);
 
@@ -1093,7 +1356,9 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
         error: verifyOrderError,
       } = await supabase
         .from("orders")
-        .select("id, status, invoice_total, delivery_date")
+        .select(
+          "id, status, invoice_total, delivery_date, send_date, warehouse_send_date"
+        )
         .eq("id", id)
         .maybeSingle();
 
@@ -1135,9 +1400,30 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
       setOrder((previous: any) => ({
         ...previous,
         delivery_date: savedOrder.delivery_date,
+        warehouse_send_date: savedOrder.warehouse_send_date,
       }));
 
       setDeliveryDate(savedOrder.delivery_date || getTodayJalaliString());
+
+      if (savedOrder.warehouse_send_date) {
+        const savedWarehouseSendDate = String(
+          savedOrder.warehouse_send_date
+        ).substring(0, 10);
+
+        const date = new Date(`${savedWarehouseSendDate}T12:00:00`);
+
+        if (!Number.isNaN(date.getTime())) {
+          const jalali = new DateObject({
+            date,
+            calendar: persian,
+            locale: persian_fa,
+          });
+
+          setWarehouseSendDate(
+            `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`
+          );
+        }
+      }
 
       alert(
         "تغییرات سفارش و مستندات تحویلی با موفقیت ذخیره شد."
@@ -1231,6 +1517,35 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           <div><strong>ویزیتور:</strong><br />{order.customers?.visitor || "-"}</div>
           <div><strong>وضعیت:</strong><br />{order.status === "approved" ? "تأیید شده" : order.status}</div>
           <div><strong>تاریخ ثبت:</strong><br />{new Date(order.created_at).toLocaleDateString("fa-IR")}</div>
+          <div>
+            <strong>تاریخ ارسال سفارش:</strong><br />
+            {isEditing ? (
+              <DatePicker
+                calendar={persian}
+                locale={persian_fa}
+                format="YYYY/MM/DD"
+                value={warehouseSendDate || ""}
+                onChange={(date: any) => {
+                  if (date) {
+                    setWarehouseSendDate(
+                      `${date.year}/${String(date.month.number).padStart(2, "0")}/${String(date.day).padStart(2, "0")}`
+                    );
+                  }
+                }}
+                calendarPosition="bottom-right"
+                inputClass="input"
+                editable={false}
+                placeholder="انتخاب تاریخ ارسال"
+              />
+            ) : (
+              formatWarehouseSendDate(
+                order.warehouse_send_date ||
+                  order.send_date ||
+                  null
+              )
+            )}
+          </div>
+
           {isEditing && (
             <div>
               <strong>تاریخ تحویل:</strong><br />
@@ -1264,19 +1579,33 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
         <hr style={{ margin: "30px 0" }} />
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
-          {!isEditing && (
-            <button className="btn btn-primary" onClick={startEditing}>
-              ✏️ ویرایش تحویل سفارش
+          {order.status === "approved" && !isEditing && (
+            <button
+              className="btn btn-secondary"
+              onClick={startEditing}
+              disabled={saving}
+            >
+              ✏️ ویرایش سفارش
             </button>
           )}
 
-          {order.status === "approved" && !isEditing && (
+          {order.status === "approved" && (
             <button
               className="btn btn-primary"
               onClick={markAsDelivered}
-              disabled={saving}
+              disabled={saving || isEditing}
             >
               🚚 تحویل داده شد
+            </button>
+          )}
+
+          {(order.status === "approved" || order.status === "delivered") && (
+            <button
+              className="btn btn-danger"
+              onClick={cancelOrder}
+              disabled={saving}
+            >
+              ✕ ابطال سفارش
             </button>
           )}
 
@@ -2057,9 +2386,9 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           جمع کل سفارش: {calculateGrandTotal().toLocaleString()} ریال
         </div>
 
-        {!isEditing && (
-          <div style={{ marginTop: 20, padding: 12, borderRadius: 8, background: "#e8f5e9", border: "1px solid #a5d6a7", color: "#2e7d32" }}>
-            {order.status === "approved" ? "🚚 این سفارش در حال ارسال است. برای تغییر دوباره روی «ویرایش تحویل سفارش» کلیک کنید." : "✅ این سفارش تحویل داده شده است. برای اصلاح اطلاعات تحویل می‌توانید روی «ویرایش تحویل سفارش» کلیک کنید."}
+        {!isEditing && order.status === "delivered" && (
+          <div style={{ marginTop: 20, padding: 12, borderRadius: 8, background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#475569" }}>
+            🔒 این سفارش تحویل داده شده است و دیگر قابل ویرایش نیست.
           </div>
         )}
 
