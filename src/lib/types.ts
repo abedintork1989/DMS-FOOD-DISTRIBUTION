@@ -528,7 +528,7 @@ export type Order = {
   // تاریخ ها
 
 
-  created_at: string;
+ created_at?: string;
 
 
   createdAt?: string;
