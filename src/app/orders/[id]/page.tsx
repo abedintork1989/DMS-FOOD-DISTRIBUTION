@@ -363,6 +363,13 @@ export default function OrderDetailPage() {
   }
 
   function startEditing() {
+    if (order.status !== "pending") {
+      alert(
+        "این سفارش بعد از تأیید قابل ویرایش در صفحه سفارشات نیست."
+      );
+      return;
+    }
+
     setEditedItems(order.order_items || []);
     setIsEditing(true);
   }
@@ -592,8 +599,76 @@ export default function OrderDetailPage() {
     return status || "-";
   }
 
+  async function cancelOrder() {
+    if (saving) return;
+
+    if (order.status !== "pending" && order.status !== "approved") {
+      alert("این سفارش در وضعیت فعلی قابل ابطال نیست.");
+      return;
+    }
+
+    const confirmation = window.confirm(
+      order.status === "approved"
+        ? "آیا از ابطال سفارش تأیید شده مطمئن هستید؟"
+        : "آیا از ابطال سفارش در انتظار تأیید مطمئن هستید؟"
+    );
+
+    if (!confirmation) return;
+
+    setSaving(true);
+
+    try {
+      const cancelledFrom = order.status;
+
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "cancelled",
+          cancelled_from: cancelledFrom,
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) {
+        console.log("CANCEL ORDER ERROR:", error);
+        alert(`خطا در ابطال سفارش: ${error.message}`);
+        return;
+      }
+
+      setIsEditing(false);
+      setShowAddProduct(false);
+      setSelectedProductIds({});
+      setPendingCartons({});
+
+      await loadOrder();
+
+      alert(
+        cancelledFrom === "approved"
+          ? "سفارش تأیید شده با موفقیت ابطال شد."
+          : "سفارش با موفقیت ابطال شد."
+      );
+    } catch (error: any) {
+      console.log("CANCEL ORDER ERROR:", error);
+      alert(
+        `خطا در ابطال سفارش: ${
+          error?.message || "خطای نامشخص"
+        }`
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function approveOrder() {
     if (saving) return;
+
+    if (order.status !== "pending") {
+      alert(
+        "این سفارش در این صفحه قابل ذخیره یا بازتأیید نیست."
+      );
+      setIsEditing(false);
+      return;
+    }
 
     // اگر کالاهایی در پنجره افزودن کالا انتخاب شده‌اند
     // ولی هنوز ثبت نشده‌اند، همان لحظه به لیست موقت سفارش اضافه می‌کنیم.
@@ -1094,6 +1169,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
   if (!order) return <div>سفارش پیدا نشد</div>;
 
   const isApproved = order.status === "approved";
+  const canEditInOrdersPage = order.status === "pending";
 
   return (
     <AppShell>
@@ -1114,7 +1190,25 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         >
           <div><strong>مشتری:</strong><br />{order.customers?.name || "-"}</div>
           <div><strong>ویزیتور:</strong><br />{order.customers?.visitor || "-"}</div>
-          <div><strong>وضعیت:</strong><br />{order.status === "approved" ? "تأیید شده" : order.status}</div>
+          <div>
+            <strong>وضعیت:</strong>
+            <br />
+            {order.status === "pending"
+              ? "در انتظار تایید"
+              : order.status === "approved"
+              ? "تایید شده"
+              : order.status === "delivered"
+              ? "تحویل داده شد"
+              : order.status === "cancelled"
+              ? `ابطال (${
+                  order.cancelled_from === "approved"
+                    ? "تایید شده"
+                    : order.cancelled_from === "pending"
+                    ? "در انتظار تایید"
+                    : "سفارش"
+                })`
+              : order.status}
+          </div>
           <div>
             <strong>تاریخ ثبت سفارش:</strong><br />
             {toJalaliDate(order.created_at)}
@@ -1123,7 +1217,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           <div>
             <strong>تاریخ ارسال سفارش:</strong><br />
 
-            {isEditing ? (
+            {isEditing && canEditInOrdersPage ? (
               <div style={{ position: "relative", marginTop: 8 }}>
                 <DatePicker
                   value={sendDate}
@@ -1166,13 +1260,13 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         <hr style={{ margin: "30px 0" }} />
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
-          {!isEditing && (
+          {!isEditing && canEditInOrdersPage && (
             <button className="btn btn-primary" onClick={startEditing}>
-              ✏️ {isApproved ? "اصلاح سفارش" : "ویرایش سفارش"}
+              ✏️ ویرایش سفارش
             </button>
           )}
 
-          {isEditing && (
+          {isEditing && canEditInOrdersPage && (
             <>
               <button className="btn btn-primary" onClick={openAddProduct}>
                 ➕ افزودن کالای جدید
@@ -1187,9 +1281,20 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
               </button>
             </>
           )}
+
+          {!isEditing &&
+            (order.status === "pending" || order.status === "approved") && (
+              <button
+                className="btn btn-danger"
+                onClick={cancelOrder}
+                disabled={saving}
+              >
+                ✕ ابطال سفارش
+              </button>
+            )}
         </div>
 
-        {isEditing && (
+        {isEditing && canEditInOrdersPage && (
           <div style={{ marginBottom: 20, padding: 12, borderRadius: 8, background: "#fff8e1", border: "1px solid #f0d98c" }}>
             <strong>حالت ویرایش فعال است</strong>
             <div style={{ marginTop: 5, fontSize: 14 }}>
@@ -1199,7 +1304,7 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         )}
 
         {/* مودال افزودن چند کالای جدید */}
-        {showAddProduct && (
+        {showAddProduct && canEditInOrdersPage && (
           <div
             style={{
               position: "fixed",
@@ -1521,37 +1626,118 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
                                   )}
                                 </span>
                               ) : selected ? (
-                                <input
-                                  className="input"
-                                  type="number"
-                                  min="1"
-                                  step="1"
-                                  value={
-                                    pendingCartons[
-                                      product.id
-                                    ] || ""
-                                  }
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    changePendingCartons(
-                                      product.id,
-                                      e.target.value
-                                    );
-                                  }}
-                                  onClick={(e) =>
-                                    e.stopPropagation()
-                                  }
-                                  placeholder="تعداد"
+                                <div
                                   style={{
-                                    width: 100,
-                                    padding: 7,
-                                    fontWeight: 700,
-                                    border:
-                                      "2px solid #f97316",
-                                    background:
-                                      "#fff7ed",
+                                    display: "inline-flex",
+                                    alignItems: "stretch",
+                                    gap: 4,
+                                    direction: "ltr",
                                   }}
-                                />
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 3,
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-label="افزایش تعداد کارتن"
+                                      onClick={() => {
+                                        const current = Number(
+                                          pendingCartons[product.id] || 0
+                                        );
+                                        changePendingCartons(
+                                          product.id,
+                                          String(current + 1)
+                                        );
+                                      }}
+                                      style={{
+                                        width: 28,
+                                        height: 22,
+                                        border: "1px solid #f97316",
+                                        borderRadius: 5,
+                                        background: "#fff7ed",
+                                        color: "#c2410c",
+                                        fontSize: 16,
+                                        fontWeight: 900,
+                                        lineHeight: 1,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      +
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      aria-label="کاهش تعداد کارتن"
+                                      onClick={() => {
+                                        const current = Number(
+                                          pendingCartons[product.id] || 1
+                                        );
+                                        if (current <= 1) return;
+                                        changePendingCartons(
+                                          product.id,
+                                          String(current - 1)
+                                        );
+                                      }}
+                                      style={{
+                                        width: 28,
+                                        height: 22,
+                                        border: "1px solid #fed7aa",
+                                        borderRadius: 5,
+                                        background: "#ffffff",
+                                        color: "#9a3412",
+                                        fontSize: 16,
+                                        fontWeight: 900,
+                                        lineHeight: 1,
+                                        cursor:
+                                          Number(
+                                            pendingCartons[product.id] || 1
+                                          ) <= 1
+                                            ? "not-allowed"
+                                            : "pointer",
+                                        opacity:
+                                          Number(
+                                            pendingCartons[product.id] || 1
+                                          ) <= 1
+                                            ? 0.5
+                                            : 1,
+                                      }}
+                                    >
+                                      −
+                                    </button>
+                                  </div>
+
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={
+                                      pendingCartons[product.id] || ""
+                                    }
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      changePendingCartons(
+                                        product.id,
+                                        e.target.value
+                                      );
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder="تعداد"
+                                    style={{
+                                      width: 82,
+                                      padding: 7,
+                                      fontWeight: 700,
+                                      border: "2px solid #f97316",
+                                      background: "#fff7ed",
+                                      textAlign: "center",
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 "-"
                               )}
@@ -1767,82 +1953,134 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
                       {/* فقط این ستون قابل ویرایش است */}
                       <td>
                         {isEditing ? (
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={
-                              finalOrderQuantity
-                            }
-                            onChange={(e) => {
-                              const value =
-                                e.target.value;
-
-                              // صفر مجاز است.
-                              // عدد اعشاری، منفی یا غیرصحیح مجاز نیست.
-                              if (
-                                value === ""
-                              ) {
-                                setEditedItems(
-                                  (previous) =>
-                                    previous.map(
-                                      (
-                                        x: any
-                                      ) =>
-                                        x.id ===
-                                        item.id
-                                          ? {
-                                              ...x,
-                                              final_order_quantity: 0,
-                                            }
-                                          : x
-                                    )
-                                );
-                                return;
-                              }
-
-                              const number =
-                                Number(
-                                  value
-                                );
-
-                              if (
-                                !Number.isInteger(
-                                  number
-                                ) ||
-                                number < 0
-                              ) {
-                                return;
-                              }
-
-                              setEditedItems(
-                                (previous) =>
-                                  previous.map(
-                                    (x: any) =>
-                                      x.id ===
-                                      item.id
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "stretch",
+                              gap: 4,
+                              direction: "ltr",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 3,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                aria-label="افزایش تعداد"
+                                onClick={() => {
+                                  setEditedItems((previous) =>
+                                    previous.map((x: any) =>
+                                      x.id === item.id
                                         ? {
                                             ...x,
                                             final_order_quantity:
-                                              number,
+                                              Number(x.final_order_quantity || 0) + 1,
                                           }
                                         : x
+                                    )
+                                  );
+                                }}
+                                style={{
+                                  width: 28,
+                                  height: 22,
+                                  border: "1px solid #2563eb",
+                                  borderRadius: 5,
+                                  background: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  fontSize: 16,
+                                  fontWeight: 900,
+                                  lineHeight: 1,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                +
+                              </button>
+
+                              <button
+                                type="button"
+                                aria-label="کاهش تعداد"
+                                onClick={() => {
+                                  setEditedItems((previous) =>
+                                    previous.map((x: any) =>
+                                      x.id === item.id
+                                        ? {
+                                            ...x,
+                                            final_order_quantity: Math.max(
+                                              0,
+                                              Number(x.final_order_quantity || 0) - 1
+                                            ),
+                                          }
+                                        : x
+                                    )
+                                  );
+                                }}
+                                style={{
+                                  width: 28,
+                                  height: 22,
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: 5,
+                                  background: "#ffffff",
+                                  color: "#475569",
+                                  fontSize: 16,
+                                  fontWeight: 900,
+                                  lineHeight: 1,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                −
+                              </button>
+                            </div>
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={finalOrderQuantity}
+                              onChange={(e) => {
+                                const value = e.target.value;
+
+                                if (value === "") {
+                                  setEditedItems((previous) =>
+                                    previous.map((x: any) =>
+                                      x.id === item.id
+                                        ? { ...x, final_order_quantity: 0 }
+                                        : x
+                                    )
+                                  );
+                                  return;
+                                }
+
+                                const number = Number(value);
+
+                                if (!Number.isInteger(number) || number < 0) {
+                                  return;
+                                }
+
+                                setEditedItems((previous) =>
+                                  previous.map((x: any) =>
+                                    x.id === item.id
+                                      ? { ...x, final_order_quantity: number }
+                                      : x
                                   )
-                              );
-                            }}
-                            style={{
-                              width: 95,
-                              padding: 7,
-                              fontWeight: 700,
-                              border:
-                                "2px solid #2563eb",
-                              background:
-                                finalOrderQuantity ===
-                                0
-                                  ? "#fff1f2"
-                                  : "#eff6ff",
-                            }}
-                          />
+                                );
+                              }}
+                              style={{
+                                width: 95,
+                                padding: 7,
+                                fontWeight: 700,
+                                border: "2px solid #2563eb",
+                                background:
+                                  finalOrderQuantity === 0
+                                    ? "#fff1f2"
+                                    : "#eff6ff",
+                                textAlign: "center",
+                              }}
+                            />
+                          </div>
                         ) : (
                           <span
                             style={{

@@ -21,6 +21,8 @@ type Order = {
   send_date?: string | null;
   warehouse_send_date?: string | null;
   delivery_date?: string | null;
+  cancelled_from?: string | null;
+  cancelled_at?: string | null;
   customers?: {
     name: string;
     visitor: string | null;
@@ -107,34 +109,73 @@ function formatSendDate(value: string | null | undefined) {
   return `${toPersianDigits(year)}/${toPersianDigits(month)}/${toPersianDigits(day)}`;
 }
 
-// نمایش تاریخ تحویل دقیقاً مثل تاریخ ثبت سفارش بدون تبدیل اشتباه شمسی به میلادی
+// نمایش تاریخ تحویل همیشه به شمسی.
+// تاریخ ممکن است از دیتابیس به دو شکل برسد:
+//   1) شمسی: 1405/05/22
+//   2) میلادی/ISO: 2026-08-13
+// در هر دو حالت خروجی این ستون شمسی است.
 function formatDeliveryDate(value: string | null | undefined) {
   if (!value) return "-";
 
   const clean = String(value).trim();
   const datePart = clean.split(" ")[0];
-  const parts = datePart.split("/");
 
-  if (parts.length !== 3) return clean;
+  // اگر مقدار از ابتدا شمسی ذخیره شده باشد، همان را نمایش بده.
+  const slashParts = datePart.split("/");
 
-  const [year, month, day] = parts;
+  if (
+    slashParts.length === 3 &&
+    Number(slashParts[0]) >= 1300 &&
+    Number(slashParts[0]) <= 1500
+  ) {
+    const [year, month, day] = slashParts;
 
-  const months = [
-    "فروردین",
-    "اردیبهشت",
-    "خرداد",
-    "تیر",
-    "مرداد",
-    "شهریور",
-    "مهر",
-    "آبان",
-    "آذر",
-    "دی",
-    "بهمن",
-    "اسفند",
-  ];
+    const months = [
+      "فروردین",
+      "اردیبهشت",
+      "خرداد",
+      "تیر",
+      "مرداد",
+      "شهریور",
+      "مهر",
+      "آبان",
+      "آذر",
+      "دی",
+      "بهمن",
+      "اسفند",
+    ];
 
-  return `${toPersianDigits(Number(day))} ${months[Number(month) - 1]} ${toPersianDigits(Number(year))}`;
+    return `${toPersianDigits(Number(day))} ${months[Number(month) - 1]} ${toPersianDigits(Number(year))}`;
+  }
+
+  // اگر مقدار ISO/Gregorian باشد، آن را به شمسی تبدیل کن.
+  const normalized =
+    datePart.length === 10 && datePart.includes("-")
+      ? `${datePart}T12:00:00`
+      : clean;
+
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return clean;
+  }
+
+  const formatter = new Intl.DateTimeFormat(
+    "fa-IR-u-ca-persian-nu-latn",
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  );
+
+  const parts = formatter.formatToParts(date);
+
+  const year = parts.find((p) => p.type === "year")?.value || "";
+  const month = parts.find((p) => p.type === "month")?.value || "";
+  const day = parts.find((p) => p.type === "day")?.value || "";
+
+  return `${toPersianDigits(year)}/${toPersianDigits(month)}/${toPersianDigits(day)}`;
 }
 
 // تاریخ امروز به شمسی، با همان فرمت ذخیره‌شده در دیتابیس (YYYY/MM/DD)
@@ -154,10 +195,30 @@ function getTodayJalaliString() {
   return `${year}/${month}/${day}`;
 }
 
-function warehouseStatus(status: string) {
+function warehouseStatus(
+  status: string,
+  cancelledFrom?: string | null
+) {
   if (status === "delivered") {
     return { label: "تحویل داده شد", className: "info" };
   }
+
+  if (status === "cancelled") {
+    const fromLabel =
+      cancelledFrom === "approved"
+        ? "در حال ارسال"
+        : cancelledFrom === "delivered"
+        ? "تحویل داده شد"
+        : cancelledFrom === "pending"
+        ? "در انتظار تایید"
+        : "سفارش";
+
+    return {
+      label: `ابطال (${fromLabel})`,
+      className: "cancelled",
+    };
+  }
+
   return { label: "در حال ارسال", className: "warning" };
 }
 
@@ -183,7 +244,7 @@ export default function WarehousePage() {
           province
         )
       `)
-      .in("status", ["approved", "delivered"])
+      .in("status", ["approved", "delivered", "cancelled"])
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -289,15 +350,21 @@ export default function WarehousePage() {
         filterable: true,
         searchable: true,
         sortable: true,
-        accessor: (row) => warehouseStatus(row.status).label,
+        accessor: (row) =>
+          warehouseStatus(row.status, row.cancelled_from).label,
         render: (_value, row) => {
-          const status = warehouseStatus(row.status);
+          const status = warehouseStatus(
+            row.status,
+            row.cancelled_from
+          );
 
           const background =
             row.status === "approved"
               ? "#fed7aa"
               : row.status === "delivered"
               ? "#dcfce7"
+              : row.status === "cancelled"
+              ? "#fecaca"
               : "#f8fafc";
 
           const foreground =
@@ -305,6 +372,8 @@ export default function WarehousePage() {
               ? "#9a3412"
               : row.status === "delivered"
               ? "#166534"
+              : row.status === "cancelled"
+              ? "#b91c1c"
               : "#475569";
 
           return (
@@ -346,7 +415,9 @@ export default function WarehousePage() {
               onClick={() => router.push(`/warehouse/${row.id}`)}
             >
               <Eye size={15} />
-              مشاهده / ویرایش
+              {row.status === "cancelled"
+                ? "مشاهده"
+                : "مشاهده / ویرایش"}
             </button>
 
 
@@ -364,18 +435,12 @@ export default function WarehousePage() {
           width: 100% !important;
           max-width: 100% !important;
           box-sizing: border-box !important;
-          overflow: visible !important;
         }
 
         .warehouse-page-auto .table-wrap {
           width: 100% !important;
           max-width: 100% !important;
-          overflow: visible !important;
-        }
-
-        .warehouse-page-auto .table-wrap,
-        .warehouse-page-auto .table-wrap > div {
-          overflow: visible !important;
+          overflow-x: hidden !important;
         }
 
         .warehouse-page-auto table {
@@ -390,25 +455,9 @@ export default function WarehousePage() {
           font-size: clamp(11px, 0.82vw, 14px) !important;
           line-height: 1.35 !important;
           white-space: nowrap;
-          box-sizing: border-box !important;
-        }
-
-        .warehouse-page-auto th {
-          position: relative !important;
-          overflow: visible !important;
-          z-index: 20 !important;
-        }
-
-        .warehouse-page-auto td {
           overflow: hidden;
           text-overflow: ellipsis;
-        }
-
-        .warehouse-page-auto th [role="dialog"],
-        .warehouse-page-auto th [data-radix-popper-content-wrapper],
-        .warehouse-page-auto th .filter-menu,
-        .warehouse-page-auto th .filter-dropdown {
-          z-index: 99999 !important;
+          box-sizing: border-box !important;
         }
 
         .warehouse-page-auto th:nth-child(1),
@@ -460,7 +509,7 @@ export default function WarehousePage() {
               color: "#64748b",
             }}
           >
-            هنوز سفارش تأییدشده‌ای وارد انبار نشده است.
+            هنوز سفارشی در انبار ثبت نشده است.
           </div>
         ) : (
           <DataTable
