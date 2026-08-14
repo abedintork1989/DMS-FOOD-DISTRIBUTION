@@ -211,17 +211,7 @@ video {
   font-weight:800;
 }
 
-@media(max-width:900px){
-  .top-navigation{
-    flex-direction:column;
-    padding:16px;
-  }
 
-  .navigation-menu{
-    justify-content:flex-start;
-    flex-wrap:wrap;
-  }
-}
 
 /* =========================================================
    SIDEBAR
@@ -1082,442 +1072,6 @@ tbody tr:last-child td {
   font-size: 12px;
 }
 
-/* =========================================================
-   TABLET
-========================================================= */
-
-@media (max-width: 1100px) {
-
-  .card-grid {
-    grid-template-columns:
-      repeat(2, minmax(0, 1fr));
-  }
-
-  .grid-2 {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* =========================================================
-   MOBILE
-========================================================= */
-
-@media (max-width: 800px) {
-
-  html,
-  body {
-    width: 100%;
-
-    max-width: 100%;
-
-    overflow-x: hidden;
-  }
-
-  .sidebar {
-    width: 280px;
-
-    transform:
-      translateX(100%);
-
-    transition:
-      transform 0.22s ease;
-
-    box-shadow:
-      -10px 0 40px
-      rgba(0, 0, 0, 0.18);
-  }
-
-  .sidebar.open {
-    transform:
-      translateX(0);
-  }
-
-  .main-with-sidebar {
-    width: 100%;
-
-    margin-right: 0;
-
-    min-height: 100vh;
-
-    overflow-x: hidden;
-  }
-
-  .page-content {
-    width: 100%;
-
-    padding:
-      14px;
-
-    overflow-x: hidden;
-  }
-
-  .mobile-menu-btn {
-    display: inline-flex;
-  }
-
-  .topbar {
-    width: 100%;
-
-    align-items: flex-start;
-
-    flex-direction: column;
-
-    gap: 12px;
-
-    margin-bottom: 18px;
-  }
-
-  .top-actions {
-    width: 100%;
-  }
-
-  .top-actions .btn {
-    flex: 1;
-  }
-
-  .page-title {
-    font-size: 22px;
-
-    line-height: 1.5;
-  }
-
-  .page-subtitle {
-    font-size: 12px;
-
-    line-height: 1.8;
-  }
-
-  .panel {
-    padding:
-      14px;
-
-    border-radius: 13px;
-  }
-
-  .card-grid {
-    grid-template-columns: 1fr;
-
-    gap: 12px;
-  }
-
-  .grid-2 {
-    gap: 12px;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
-
-    gap: 12px;
-  }
-
-  .form-field.full {
-    grid-column: auto;
-  }
-
-  .toolbar {
-    width: 100%;
-  }
-
-  .search-box {
-    width: 100%;
-  }
-
-  /* =======================================================
-     جدول در موبایل تبدیل به کارت می‌شود
-     بنابراین هیچ اسکرول چپ و راست نداریم.
-  ======================================================= */
-
-  .table-wrap {
-    width: 100%;
-
-    overflow: visible;
-  }
-
-  table,
-  thead,
-  tbody,
-  tr,
-  th,
-  td {
-    display: block;
-
-    width: 100%;
-  }
-
-  table {
-    min-width: 0;
-
-    border: 0;
-  }
-
-  thead {
-    display: none;
-  }
-
-  tbody {
-    display: grid;
-
-    gap: 10px;
-  }
-
-  tbody tr {
-    width: 100%;
-
-    background: #fff;
-
-    border:
-      1px solid var(--border);
-
-    border-radius: 13px;
-
-    padding: 10px;
-
-    box-shadow:
-      0 2px 8px
-      rgba(15, 23, 42, 0.03);
-  }
-
-  tbody tr:hover {
-    background: #fff;
-  }
-
-  tbody td {
-    width: 100%;
-
-    min-width: 0;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: space-between;
-
-    gap: 12px;
-
-    padding:
-      8px 4px;
-
-    border-bottom:
-      1px solid #f1f5f9;
-
-    white-space: normal;
-
-    text-align: right;
-
-    font-size: 12px;
-
-    overflow-wrap: anywhere;
-  }
-
-  tbody td:last-child {
-    border-bottom: 0;
-
-    padding-bottom: 4px;
-  }
-
-  /*
-   * عنوان هر ستون
-   */
-
-  tbody td:nth-child(1)::before {
-    content: "فروشگاه";
-  }
-
-  tbody td:nth-child(2)::before {
-    content: "مسئول";
-  }
-
-  tbody td:nth-child(3)::before {
-    content: "تلفن";
-  }
-
-  tbody td:nth-child(4)::before {
-    content: "استان";
-  }
-
-  tbody td:nth-child(5)::before {
-    content: "ویزیتور";
-  }
-
-  tbody td:nth-child(6)::before {
-    content: "عملیات";
-  }
-
-  tbody td::before {
-    flex:
-      0 0 auto;
-
-    color: var(--muted);
-
-    font-size: 11px;
-
-    font-weight: 700;
-  }
-
-  tbody td > * {
-    max-width: 70%;
-
-    overflow-wrap: anywhere;
-  }
-
-  /* =====================================================
-     دکمه‌ها
-  ===================================================== */
-
-  .btn {
-    min-height: 42px;
-
-    padding:
-      9px 12px;
-
-    font-size: 12px;
-  }
-
-  .btn-small {
-    min-height: 36px;
-
-    padding:
-      7px 10px;
-  }
-
-  .action-row {
-    width: 100%;
-  }
-
-  .action-row .btn {
-    flex: 1;
-  }
-
-  /* =====================================================
-     MODAL
-  ===================================================== */
-
-  .modal-backdrop {
-    padding: 10px;
-
-    align-items: flex-end;
-  }
-
-  .modal,
-  .customer-modal {
-    width: 100%;
-
-    max-width: 100%;
-
-    max-height: 94vh;
-
-    border-radius:
-      18px 18px 10px 10px;
-
-    padding:
-      16px;
-  }
-
-  .modal-header {
-    margin-bottom: 15px;
-  }
-
-  .modal-header h2 {
-    font-size: 18px;
-  }
-
-  .modal-summary {
-    flex-direction: column;
-
-    align-items: stretch;
-
-    gap: 7px;
-  }
-
-  .modal-actions {
-    display: flex;
-
-    width: 100%;
-
-    gap: 8px;
-  }
-
-  .modal-actions .btn {
-    flex: 1;
-  }
-
-  /* =====================================================
-     INPUT
-  ===================================================== */
-
-  .input,
-  .select,
-  .textarea {
-    font-size: 14px;
-
-    min-height: 44px;
-  }
-
-  .textarea {
-    min-height: 90px;
-  }
-
-  /* =====================================================
-     LOGIN
-  ===================================================== */
-
-  .login-page {
-    padding: 14px;
-  }
-
-  .login-card {
-    width: 100%;
-
-    padding: 22px;
-
-    border-radius: 17px;
-  }
-}
-
-/* =========================================================
-   SMALL MOBILE
-========================================================= */
-
-@media (max-width: 400px) {
-
-  .page-content {
-    padding:
-      10px;
-  }
-
-  .panel {
-    padding:
-      11px;
-  }
-
-  .page-title {
-    font-size: 20px;
-  }
-
-  .page-subtitle {
-    font-size: 11px;
-  }
-
-  .stat-card {
-    padding:
-      15px;
-  }
-
-  tbody td {
-    font-size: 11px;
-  }
-
-  tbody td::before {
-    font-size: 10px;
-  }
-
-  .modal,
-  .customer-modal {
-    padding:
-      13px;
-  }
-}
-
 .order-row-pending td { background: #fffbeb; }
 .order-row-approved td { background: #fff7ed; }
 .order-row-delivered td { background: #f0fdf4; }
@@ -1706,37 +1260,10 @@ tbody tr:last-child td {
 }
 
 
-@media(max-width:1200px){
-
-.premium-header{
-  padding:0 20px;
-}
-
-.premium-menu{
-  overflow-x:auto;
-  justify-content:flex-start;
-}
-
-}
 
 
-@media(max-width:900px){
 
-.premium-header{
-  height:auto;
-  flex-direction:column;
-  padding:18px;
-}
 
-.premium-menu{
-  flex-wrap:wrap;
-}
-
-.user-area{
-  justify-content:center;
-}
-
-}
 
 
 
@@ -1764,12 +1291,7 @@ tbody tr:last-child td {
   letter-spacing:-.3px;
 }
 
-@media(max-width:900px){
-  .main-with-sidebar{
-    width:100%;
-    margin-right:0;
-  }
-}
+
 
 /* =========================================================
    BOTANICAL LOGIN DESIGN
@@ -1842,32 +1364,15 @@ tbody tr:last-child td {
 .dashboard-main-grid { display: grid; grid-template-columns: minmax(0, 1.38fr) minmax(310px, .82fr); gap: 18px; }.dashboard-bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }.dashboard-panel { min-width: 0; padding: 22px; border: 1px solid #edf2ee; border-radius: 18px; background: #fff; box-shadow: 0 7px 22px rgba(24, 65, 44, .06); }.dashboard-panel-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }.dashboard-panel-title span { color: #82948a; font-size: 11px; }.dashboard-panel-title h2 { margin: 5px 0 0; color: #173f2d; font-size: 17px; }.view-all { display: flex; align-items: center; gap: 5px; padding: 8px 10px; border: 1px solid #dceee1; border-radius: 10px; color: #16834d; font-size: 11px; font-weight: 800; }.view-all:hover { background: #effaf2; }.dashboard-order-table { overflow-x: auto; }.dashboard-order-table table { min-width: 620px; }.dashboard-order-table th { padding: 11px 9px; color: #82948a; background: transparent; }.dashboard-order-table td { padding: 13px 9px; color: #40584b; font-size: 12px; }.dashboard-order-table tr:last-child td { border-bottom: 0; }.order-id { color: #159052 !important; font-weight: 900; }.order-status { display: inline-flex; padding: 6px 9px; border-radius: 8px; font-size: 10px; font-weight: 800; }.order-status.pending { color: #ae6a00; background: #fff5dc; }.order-status.approved { color: #147747; background: #e6f8ec; }.order-status.delivered { color: #2476b4; background: #e8f4ff; }.order-status.cancelled { color: #c34141; background: #fff0f0; }.order-view { color: #58806b; }.order-view:hover { color: #11814a; }
 .sales-overview { overflow: hidden; }.sales-overview > .dashboard-panel-title > svg { padding: 9px; width: 40px; height: 40px; border-radius: 12px; color: #16834e; background: #e7f8ed; }.sales-total { display: grid; gap: 7px; margin-bottom: 12px; }.sales-total span { color: #778d80; font-size: 12px; }.sales-total strong { color: #108a4c; font-size: 23px; }.sales-bars { display: flex; height: 180px; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 10px 5px 0; border-bottom: 1px solid #e8f0e9; background: repeating-linear-gradient(to bottom, transparent 0, transparent 43px, #edf3ef 44px); }.sales-bar-column { display: grid; flex: 1; height: 100%; align-items: end; justify-items: center; gap: 8px; }.sales-bar-column i { display: block; width: min(26px, 100%); min-height: 10px; border-radius: 10px 10px 4px 4px; background: linear-gradient(#31ad68, #0e8047); }.sales-bar-column span { color: #82948a; font-size: 10px; }.panel-note { margin: 17px 0 0; color: #8a9c92; font-size: 11px; line-height: 1.8; }
 .quick-actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }.quick-link { position: relative; display: grid; min-height: 118px; align-content: center; justify-items: center; gap: 10px; border-radius: 14px; color: #16844c; background: linear-gradient(145deg, #f1fbf4, #e9f7ed); font-size: 11px; font-weight: 800; transition: .18s ease; }.quick-link > svg:last-child { position: absolute; top: 9px; left: 9px; color: #86b99b; }.quick-link:hover { transform: translateY(-3px); color: #086e3d; box-shadow: 0 9px 16px rgba(20,126,69,.13); }.activity-panel { min-height: 245px; }.activity-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef3ef; }.activity-item:last-child { border-bottom: 0; }.activity-icon { display: grid; flex: 0 0 35px; width: 35px; height: 35px; place-items: center; border-radius: 11px; color: #16864d; background: #e7f8ec; }.activity-item strong { display: block; color: #345243; font-size: 12px; }.activity-item p { margin: 5px 0 0; color: #87988f; font-size: 10px; }
-@media (max-width: 1200px) { .dashboard-stats { grid-template-columns: repeat(3, 1fr); margin: 18px 0; }.dashboard-main-grid { grid-template-columns: 1fr; }.sales-bars { height: 155px; } }
-@media (max-width: 760px) { .dms-content { padding: 16px 14px 30px; }.dashboard-hero { min-height: 205px; padding: 27px 22px; border-radius: 18px; }.dashboard-hero h1 { font-size: 25px; }.dashboard-date { display: none; }.dashboard-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }.dashboard-metric { min-height: 112px; padding: 14px 11px; gap: 9px; }.dashboard-metric strong { font-size: 14px; white-space: normal; }.metric-icon { flex-basis: 34px; width: 34px; height: 34px; }.dashboard-bottom-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }.dashboard-panel { padding: 17px; border-radius: 15px; }.quick-actions-grid { grid-template-columns: repeat(2, 1fr); }.quick-link { min-height: 100px; }.dashboard-order-table table { min-width: 560px; } }
-@media (max-width: 390px) { .dashboard-stats { grid-template-columns: 1fr; }.dashboard-metric { min-height: auto; }.dashboard-hero p { font-size: 12px; } }
 
-@media (max-width: 1200px) {
-  .dms-premium-header { padding: 12px 18px; gap: 16px; }
-  .dms-premium-header .premium-menu { justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; }
-  .dms-premium-header .help-icon { display: none; }
-}
 
-@media (max-width: 900px) {
-  .dms-premium-header { display: grid; grid-template-columns: 1fr auto; align-items: center; }
-  .dms-premium-header .premium-brand { grid-column: 1; grid-row: 1; }
-  .dms-premium-header .user-area { grid-column: 2; grid-row: 1; }
-  .dms-premium-header .premium-menu { grid-column: 1 / -1; grid-row: 2; width: 100%; padding-top: 5px; }
-  .dms-premium-header .profile-box { display: none; }
-}
 
-@media (max-width: 540px) {
-  .dms-premium-header { padding: 10px 12px; }
-  .dms-premium-header .brand-text { display: none; }
-  .dms-premium-header .logo-shape { width: 48px; height: 48px; border-radius: 16px; font-size: 13px; }
-  .dms-premium-header .header-icon, .dms-premium-header .profile-logout { width: 39px; height: 39px; border-radius: 12px; }
-  .dms-premium-header .premium-menu-item { flex: 0 0 auto; height: 43px; padding: 0 11px; font-size: 12px; }
-  .dropdown-panel { position: fixed; top: auto; right: 12px; left: 12px; width: auto; }
-}
+
+
+
+
+
+
 
 .login-ambient { position: absolute; border-radius: 50%; filter: blur(12px); opacity: .58; }
 .login-ambient-one { width: 42rem; height: 42rem; top: -27rem; right: -8rem; background: #87b692; }
@@ -1916,6 +1421,6 @@ tbody tr:last-child td {
 .leaf::after { content: ""; position: absolute; width: 120%; height: 2px; top: 50%; left: -9%; background: rgba(224,242,226,.45); transform: rotate(-22deg); }
 .leaf-one { right: -22px; bottom: 77px; transform: rotate(18deg); }.leaf-two { right: 36px; bottom: 5px; transform: rotate(68deg) scale(.9); }.leaf-three { right: 100px; bottom: -10px; transform: rotate(108deg) scale(.78); }.leaf-four { left: -65px; bottom: 40px; transform: rotate(-32deg) scale(.9); }.leaf-five { left: -38px; bottom: 142px; transform: rotate(17deg) scale(.76); }.leaf-six { left: 12px; bottom: -15px; transform: rotate(80deg) scale(.72); }
 
-@media (max-width: 800px) { .botanical-login-page { padding: 18px; } .botanical-login-card { grid-template-columns: 1fr; min-height: 0; max-width: 500px; } .login-art-panel { min-height: 200px; padding: 28px 30px; } .art-copy h2 { margin: 10px 0 0; font-size: 22px; } .art-copy p, .art-kicker { display: none; } .botanical-form-panel { padding: 36px 28px; } .login-brand-mark { width: 48px; height: 48px; margin-bottom: 22px; } .botanical-login-form { margin-top: 30px; } .leaf { transform-origin: bottom left; opacity: .68; } .leaf-one { right: -35px; bottom: -14px; } .leaf-two { right: 35px; bottom: -39px; } .leaf-three, .leaf-four, .leaf-five { display: none; } }
 
-@media (max-width: 420px) { .botanical-login-page { padding: 12px; } .botanical-form-panel { padding: 30px 21px; } .login-art-panel { min-height: 170px; } .login-heading h1 { font-size: 24px; } }
+
+

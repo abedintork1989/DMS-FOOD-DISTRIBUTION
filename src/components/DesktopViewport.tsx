@@ -21,9 +21,11 @@ export default function DesktopViewport({
 
     updateScale();
     window.addEventListener("resize", updateScale);
+    window.addEventListener("orientationchange", updateScale);
 
     return () => {
       window.removeEventListener("resize", updateScale);
+      window.removeEventListener("orientationchange", updateScale);
     };
   }, [baseWidth]);
 
@@ -43,7 +45,6 @@ export default function DesktopViewport({
           minWidth: `${baseWidth}px`,
           marginLeft: "auto",
           marginRight: "auto",
-          flexShrink: 0,
           zoom: scale,
           position: "relative",
         }}
