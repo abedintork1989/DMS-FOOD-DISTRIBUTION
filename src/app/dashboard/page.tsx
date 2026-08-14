@@ -66,7 +66,7 @@ export default function DashboardPage() {
   }, [data.orders]);
 
   return <AppShell>
-    <section className="dashboard-hero"><div><span className="dashboard-eyebrow">نمای کلی عملکرد</span><h1>سلام، عابدین ترک <span>👋</span></h1><p>به سیستم مدیریت پخش خوش آمدید؛ وضعیت کسب‌وکار شما در یک نگاه.</p></div><div className="dashboard-date"><span>امروز</span><strong>{todayLabel()}</strong></div><div className="hero-orb hero-orb-one" /><div className="hero-orb hero-orb-two" /></section>
+    <section className="dashboard-hero"><div><span className="dashboard-eyebrow">نمای کلی عملکرد</span><h1>سلام، عابدین ترک <span>👋</span></h1><p>به سیستم مدیریت هوشمند فروش خوش آمدید؛ وضعیت کسب‌وکار شما در یک نگاه.</p></div><div className="dashboard-date"><span>امروز</span><strong>{todayLabel()}</strong></div><div className="hero-orb hero-orb-one" /><div className="hero-orb hero-orb-two" /></section>
     {loadError && <div className="dashboard-load-error">{loadError}<button onClick={loadDashboard}>تلاش دوباره</button></div>}
     <section className="dashboard-stats" aria-label="آمار کلیدی">
       <MetricCard title="فروش ثبت‌شده" value={loading ? "..." : money(stats.sales)} icon={DollarSign} tone="green" detail={`${numberFa(data.orders.length)} سفارش ثبت شده`} />

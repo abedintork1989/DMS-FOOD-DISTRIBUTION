@@ -13,7 +13,8 @@ type CustomerFinance = {
   customer_id: string;
   customer_name: string;
   province: string | null;
-  total_debt: number; // مانده حساب مشتری
+  total_debt: number;
+  branch_count: number;
 };
 
 function toPersianDigits(value: string | number) {
@@ -38,153 +39,247 @@ export default function FinancePage() {
 
   useEffect(() => {
     loadFinance();
-
-    const onFocus = () => {
-      loadFinance();
-    };
-
-    window.addEventListener("focus", onFocus);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-    };
   }, []);
 
   async function loadFinance() {
     setLoading(true);
 
-    try {
-      const [
-        ordersResult,
-        paymentsResult,
-        marketingResult,
-        allocationsResult,
-      ] = await Promise.all([
-        supabase
-          .from("orders")
-          .select(`
-            customer_id,
-            invoice_total
-          `)
-          .eq("status", "delivered"),
+    const [
+      { data: orders, error },
+      { data: customerRows, error: customersError },
+      { data: groupRows, error: groupsError },
+      { data: payments, error: paymentsError },
+      { data: marketingRows, error: marketingError },
+    ] = await Promise.all([
+      supabase
+        .from("orders")
+        .select(`
+          customer_id,
+          invoice_total,
+          customers(
+            name,
+            province,
+            customer_group_id
+          )
+        `)
+        .eq("status", "delivered"),
 
-        supabase
-          .from("payments")
-          .select(`
-            customer_id,
-            amount
-          `),
+      supabase
+        .from("customers")
+        .select("id,name,province,customer_group_id"),
 
-        supabase
-          .from("customer_marketing")
-          .select(`
-            customer_id,
-            shelf_rent,
-            tray_rent,
-            board_rent,
-            promoter_cost,
-            side_cost,
-            foc_amount
-          `),
+      supabase
+        .from("customer_groups")
+        .select("id,name,primary_customer_id"),
 
-        supabase
-          .from("payment_allocations")
-          .select(`
-            customer_id,
-            amount
-          `),
-      ]);
+      supabase
+        .from("payments")
+        .select("customer_id,amount"),
 
-      if (ordersResult.error) throw ordersResult.error;
-      if (paymentsResult.error) throw paymentsResult.error;
-      if (marketingResult.error) throw marketingResult.error;
-      if (allocationsResult.error) throw allocationsResult.error;
+      supabase
+        .from("customer_marketing")
+        .select(`
+          customer_id,
+          shelf_rent,
+          tray_rent,
+          board_rent,
+          promoter_cost,
+          side_cost,
+          foc_amount
+        `),
+    ]);
 
-      const map = new Map<string, CustomerFinance>();
-
-      // بدهی اولیه = مجموع فاکتورهای تحویل شده
-      (ordersResult.data || []).forEach((order: any) => {
-        if (!order.customer_id) return;
-
-        const old = map.get(order.customer_id);
-
-        if (old) {
-          old.total_debt -= Number(order.invoice_total || 0);
-        } else {
-          map.set(order.customer_id, {
-            customer_id: order.customer_id,
-            customer_name: "-",
-            province: "-",
-            total_debt: -Number(order.invoice_total || 0),
-          });
-        }
-      });
-
-      // مانده حساب:
-      // مجموع پرداختی‌ها + مجموع مارکتینگ - مجموع فاکتورها
-      // کاهش پرداختی‌های ثبت شده
-      (paymentsResult.data || []).forEach((payment: any) => {
-        const item = map.get(payment.customer_id);
-        if (item) {
-          item.total_debt += Number(payment.amount || 0);
-        }
-      });
-
-      // کاهش مارکتینگ‌های ثبت شده
-      (marketingResult.data || []).forEach((marketing: any) => {
-        const item = map.get(marketing.customer_id);
-
-        if (item) {
-          const marketingAmount =
-            Number(marketing.shelf_rent || 0) +
-            Number(marketing.tray_rent || 0) +
-            Number(marketing.board_rent || 0) +
-            Number(marketing.promoter_cost || 0) +
-            Number(marketing.side_cost || 0) +
-            Number(marketing.foc_amount || 0);
-
-          item.total_debt += marketingAmount;
-        }
-      });
-
-      // اطلاعات مشتریان
-      const customerIds = Array.from(map.keys());
-
-      if (customerIds.length) {
-        const { data: customers, error: customersError } = await supabase
-          .from("customers")
-          .select("id,name,province")
-          .in("id", customerIds);
-
-        if (customersError) throw customersError;
-
-        (customers || []).forEach((customer: any) => {
-          const item = map.get(customer.id);
-
-          if (item) {
-            item.customer_name = customer.name || "-";
-            item.province = customer.province || "-";
-          }
-        });
-      }
-
-      // مانده حساب باید با علامت واقعی خودش حفظ شود؛
-      // مقدار مثبت یعنی مانده مثبت و با رنگ سبز نمایش داده می‌شود.
-      const result = Array.from(map.values()).map((item) => ({
-        ...item,
-        total_debt: Number(item.total_debt || 0),
-      }));
-
-      setData(result);
-
-    } catch (error: any) {
+    if (error) {
       console.error(error);
       alert(`خطا در دریافت اطلاعات مالی: ${error.message}`);
-    } finally {
       setLoading(false);
+      return;
     }
-  }
 
+    if (customersError) {
+      console.error(customersError);
+      alert(`خطا در دریافت مشتریان مالی: ${customersError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    if (groupsError) {
+      console.error(groupsError);
+      alert(`خطا در دریافت مجموعه‌های مالی: ${groupsError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    if (paymentsError) {
+      console.error(paymentsError);
+      alert(`خطا در دریافت پرداختی‌های مالی: ${paymentsError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    if (marketingError) {
+      console.error(marketingError);
+      alert(`خطا در دریافت اطلاعات مارکتینگ: ${marketingError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const allCustomers = customerRows || [];
+    const groups = groupRows || [];
+
+    const groupMap = new Map(
+      groups.map((group: any) => [group.id, group])
+    );
+
+    const customerMap = new Map(
+      allCustomers.map((customer: any) => [customer.id, customer])
+    );
+
+    // دقیقاً مطابق منطق «مانده حساب» در صفحه دوم مالی:
+    // مانده = مجموع فاکتورهای تحویل‌شده - مجموع پرداختی‌ها - مجموع هزینه‌های مارکتینگ
+    //
+    // برای مجموعه‌ها، مشتری مادر وارد محاسبات نمی‌شود و فقط شعب زیرمجموعه
+    // در حساب مجموعه تجمیع می‌شوند.
+    const invoiceMap = new Map<string, number>();
+    const paymentMap = new Map<string, number>();
+    const marketingMap = new Map<string, number>();
+
+    (orders || []).forEach((order: any) => {
+      const customer = customerMap.get(order.customer_id);
+      if (!customer) return;
+
+      const group = customer.customer_group_id
+        ? groupMap.get(customer.customer_group_id)
+        : null;
+
+      if (group && customer.id === group.primary_customer_id) {
+        return;
+      }
+
+      const parentId =
+        group?.primary_customer_id || customer.id;
+
+      invoiceMap.set(
+        parentId,
+        (invoiceMap.get(parentId) || 0) +
+          Number(order.invoice_total || 0)
+      );
+    });
+
+    (payments || []).forEach((payment: any) => {
+      const customer = customerMap.get(payment.customer_id);
+      if (!customer) return;
+
+      const group = customer.customer_group_id
+        ? groupMap.get(customer.customer_group_id)
+        : null;
+
+      // پرداخت‌های مشتری مادرِ یک مجموعه نیز در «مانده حساب» صفحه دوم مالی
+      // محاسبه می‌شوند؛ چون ممکن است سند پرداخت روی مشتری مادر ثبت شده باشد
+      // و فاکتورها روی شعبه‌ها باشند. پس پرداخت مشتری مادر نباید حذف شود.
+      const parentId =
+        group?.primary_customer_id || customer.id;
+
+      paymentMap.set(
+        parentId,
+        (paymentMap.get(parentId) || 0) +
+          Number(payment.amount || 0)
+      );
+    });
+
+    (marketingRows || []).forEach((item: any) => {
+      const customer = customerMap.get(item.customer_id);
+      if (!customer) return;
+
+      const group = customer.customer_group_id
+        ? groupMap.get(customer.customer_group_id)
+        : null;
+
+      if (group && customer.id === group.primary_customer_id) {
+        return;
+      }
+
+      const parentId =
+        group?.primary_customer_id || customer.id;
+
+      const totalMarketing =
+        Number(item.shelf_rent || 0) +
+        Number(item.tray_rent || 0) +
+        Number(item.board_rent || 0) +
+        Number(item.promoter_cost || 0) +
+        Number(item.side_cost || 0) +
+        Number(item.foc_amount || 0);
+
+      marketingMap.set(
+        parentId,
+        (marketingMap.get(parentId) || 0) +
+          totalMarketing
+      );
+    });
+
+    const financeMap = new Map<string, CustomerFinance>();
+
+    // ساخت ردیف‌های صفحه اول با همان مشتری/مجموعه‌هایی که قبلاً نمایش داده می‌شدند.
+    (orders || []).forEach((order: any) => {
+      const customer = customerMap.get(order.customer_id);
+
+      if (!customer) return;
+
+      const group = customer.customer_group_id
+        ? groupMap.get(customer.customer_group_id)
+        : null;
+
+      if (
+        group &&
+        customer.id === group.primary_customer_id
+      ) {
+        return;
+      }
+
+      const parentId =
+        group?.primary_customer_id || customer.id;
+
+      const parentCustomer = customerMap.get(parentId);
+      const parentName =
+        group?.name ||
+        parentCustomer?.name ||
+        order.customers?.name ||
+        "-";
+
+      const branchCount = group
+        ? allCustomers.filter(
+            (c: any) =>
+              c.customer_group_id === group.id &&
+              c.id !== parentId
+          ).length
+        : 0;
+
+      if (!financeMap.has(parentId)) {
+        financeMap.set(parentId, {
+          customer_id: parentId,
+          customer_name: parentName,
+          province:
+            parentCustomer?.province ||
+            order.customers?.province ||
+            "-",
+          total_debt: 0,
+          branch_count: branchCount,
+        });
+      }
+    });
+
+    // مقدار ستون «مجموع بدهی» حالا دقیقاً همان «مانده حساب»
+    // صفحه دوم مالی است.
+    financeMap.forEach((row, parentId) => {
+      row.total_debt =
+        (invoiceMap.get(parentId) || 0) -
+        (paymentMap.get(parentId) || 0) -
+        (marketingMap.get(parentId) || 0);
+    });
+
+    setData(Array.from(financeMap.values()));
+    setLoading(false);
+  }
 
   const columns = useMemo<DataTableColumn<CustomerFinance>[]>(
     () => [
@@ -206,9 +301,23 @@ export default function FinancePage() {
         sortable: true,
         accessor: (row) => row.province || "-",
       },
+
+      {
+        key: "branch_count",
+        title: "تعداد شعبه",
+        width: 110,
+        filterable: true,
+        searchable: true,
+        sortable: true,
+        type: "number",
+        accessor: (row) => row.branch_count,
+        render: (value) => (
+          <strong>{Number(value || 0).toLocaleString("fa-IR")}</strong>
+        ),
+      },
       {
         key: "total_debt",
-        title: "مانده حساب",
+        title: "مجموع بدهی",
         width: 180,
         filterable: true,
         searchable: true,
@@ -218,22 +327,21 @@ export default function FinancePage() {
         render: (value) => {
           const balance = Number(value || 0);
 
-          if (balance === 0) {
-            return (
-              <strong style={{ color: "#64748b" }}>
-                ۰ ریال
-              </strong>
-            );
-          }
-
           return (
             <strong
               style={{
-                color: balance > 0 ? "#16a34a" : "#dc2626",
+                color:
+                  balance > 0
+                    ? "#dc2626"
+                    : balance < 0
+                    ? "#16a34a"
+                    : "#475569",
+                fontWeight: 800,
+                whiteSpace: "nowrap",
               }}
             >
-              {balance > 0 ? "+ " : "- "}
-              {money(Math.abs(balance))}
+              {(balance > 0 ? "- " : balance < 0 ? "+ " : "") +
+                money(Math.abs(balance))}
             </strong>
           );
         },
@@ -267,8 +375,23 @@ export default function FinancePage() {
     <AppShell>
       <PageHeader
         title="مالی"
-        subtitle="مدیریت وضعیت مالی مشتریان"
+        subtitle="نمای یکپارچه مالی مجموعه؛ مجموع مالی تمام شعب در همین صفحه"
       />
+
+      <div
+        style={{
+          marginBottom: 14,
+          padding: "12px 14px",
+          borderRadius: 10,
+          background: "#eff6ff",
+          border: "1px solid #bfdbfe",
+          color: "#1e3a8a",
+          fontSize: 13,
+        }}
+      >
+        در این صفحه هر مجموعه یک ردیف دارد و تمام اطلاعات مالی شعب آن مجموعه
+        به‌صورت یکپارچه در همان پرونده محاسبه و نمایش داده می‌شود.
+      </div>
 
       <div className="panel">
         {loading ? (

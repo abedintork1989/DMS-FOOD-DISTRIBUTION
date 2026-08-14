@@ -161,6 +161,13 @@ type Customer = {
   id: string;
   name: string;
   visitor?: string | null;
+  customer_group_id?: string | null;
+};
+
+type CustomerGroup = {
+  id: string;
+  name: string;
+  primary_customer_id: string;
 };
 
 type Product = {
@@ -186,12 +193,14 @@ export default function NewOrderPage() {
   const router = useRouter();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [branchCustomers, setBranchCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [discounts, setDiscounts] = useState<CustomerDiscount[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [customerId, setCustomerId] = useState("");
+  const [branchId, setBranchId] = useState("");
   const [visitor, setVisitor] = useState("");
 
   // تاریخ ارسال (شمسی) - پیش‌فرض: امروز
@@ -225,18 +234,60 @@ export default function NewOrderPage() {
   }
 
   async function loadCustomers() {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("id,name,visitor")
-      .order("name", { ascending: true });
+    const [
+      { data: customerRows, error: customerError },
+      { data: groupRows, error: groupError },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("id,name,visitor,customer_group_id")
+        .order("name", { ascending: true }),
+      supabase
+        .from("customer_groups")
+        .select("id,name,primary_customer_id")
+        .order("name", { ascending: true }),
+    ]);
 
-    if (error) {
-      console.error(error);
-      alert(`خطا در دریافت مشتریان: ${error.message}`);
+    if (customerError) {
+      console.error(customerError);
+      alert(`خطا در دریافت مشتریان: ${customerError.message}`);
       return;
     }
 
-    setCustomers((data || []) as Customer[]);
+    if (groupError) {
+      console.error(groupError);
+      alert(`خطا در دریافت مجموعه‌های مشتری: ${groupError.message}`);
+      return;
+    }
+
+    const allCustomers = (customerRows || []) as Customer[];
+    const groups = (groupRows || []) as CustomerGroup[];
+
+    const groupByParentId = new Map(
+      groups.map((group) => [group.primary_customer_id, group])
+    );
+
+    const parentIds = new Set(
+      groups.map((group) => group.primary_customer_id)
+    );
+
+    // فقط مشتری مستقل و «مشتری مادر» مجموعه‌ها در فهرست اصلی نمایش داده می‌شوند.
+    // شعبه‌ها عمداً از این لیست حذف می‌شوند و فقط بعد از انتخاب مجموعه
+    // در کادر جداگانه «انتخاب شعبه» نمایش داده خواهند شد.
+    const parentCustomers = allCustomers
+      .filter((customer) => parentIds.has(customer.id) || !customer.customer_group_id)
+      .map((customer) => {
+        const group = groupByParentId.get(customer.id);
+
+        return {
+          ...customer,
+          name: group?.name || customer.name,
+          customer_group_id: group?.id || null,
+        };
+      });
+
+    setCustomers(parentCustomers);
+    setBranchCustomers(allCustomers);
   }
 
   async function loadProducts() {
@@ -278,8 +329,29 @@ export default function NewOrderPage() {
 
   async function handleCustomerChange(id: string) {
     setCustomerId(id);
+    setBranchId("");
+
     const customer = customers.find((item) => item.id === id);
-    setVisitor(customer?.visitor || "");
+
+    if (!customer) {
+      setVisitor("");
+      setDiscounts([]);
+      return;
+    }
+
+    const branches = customer.customer_group_id
+      ? branchCustomers.filter(
+          (item) =>
+            item.customer_group_id === customer.customer_group_id &&
+            item.id !== customer.id
+        )
+      : [];
+
+    // برای مشتری مستقل، ویزیتور همان مشتری است.
+    // برای مجموعه، پس از انتخاب شعبه ویزیتور شعبه جایگزین می‌شود.
+    setVisitor(branches.length === 0 ? customer.visitor || "" : "");
+
+    // تخفیف‌ها از مشتری مادر/مجموعه خوانده می‌شوند، نه از شعبه.
     await loadCustomerDiscounts(id);
   }
 
@@ -402,12 +474,48 @@ export default function NewOrderPage() {
 
   async function submitOrder() {
     if (!customerId) {
-      alert("لطفاً مشتری را انتخاب کنید.");
+      alert("لطفاً مشتری / مجموعه را انتخاب کنید.");
       return;
     }
 
     if (orderItems.length === 0) {
       alert("حداقل یک کالا برای سفارش انتخاب کنید.");
+      return;
+    }
+
+    const selectedCustomer = customers.find((item) => item.id === customerId);
+
+    if (!selectedCustomer) {
+      alert("مشتری / مجموعه انتخاب‌شده پیدا نشد.");
+      return;
+    }
+
+    const isGroupParent = Boolean(selectedCustomer.customer_group_id);
+
+    const availableBranches = isGroupParent
+      ? branchCustomers.filter(
+          (item) =>
+            item.customer_group_id === selectedCustomer.customer_group_id &&
+            item.id !== selectedCustomer.id
+        )
+      : [];
+
+    if (isGroupParent && availableBranches.length === 0) {
+      alert("این مجموعه هنوز هیچ شعبه‌ای ندارد.");
+      return;
+    }
+
+    if (isGroupParent && !branchId) {
+      alert("این مجموعه شعبه دارد؛ برای ثبت سفارش حتماً باید نام شعبه را انتخاب کنید.");
+      return;
+    }
+
+    const actualCustomer = isGroupParent
+      ? availableBranches.find((branch) => branch.id === branchId)
+      : selectedCustomer;
+
+    if (!actualCustomer) {
+      alert("شعبه انتخاب‌شده پیدا نشد.");
       return;
     }
 
@@ -433,7 +541,9 @@ export default function NewOrderPage() {
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
-          customer_id: customerId,
+          customer_id: actualCustomer.id,
+          customer_name: actualCustomer.name,
+          visitor: visitor || actualCustomer.visitor || selectedCustomer.visitor || null,
           status: "pending",
           invoice_total: orderTotal,
           delivery_date: deliveryDate,
@@ -519,20 +629,73 @@ export default function NewOrderPage() {
           }}
         >
           <div className="form-field">
-            <label>مشتری</label>
+            <label>مشتری / مجموعه</label>
             <select
               className="input"
               value={customerId}
               onChange={(e) => handleCustomerChange(e.target.value)}
             >
-              <option value="">انتخاب مشتری</option>
+              <option value="">انتخاب مشتری / مجموعه</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.name}
+                  {customer.name}{customer.customer_group_id ? " (مجموعه)" : ""}
                 </option>
               ))}
             </select>
           </div>
+
+          {(() => {
+            const selectedCustomer = customers.find((item) => item.id === customerId);
+            const selectedGroupId = selectedCustomer?.customer_group_id || null;
+
+            if (!selectedGroupId) return null;
+
+            const branches = branchCustomers.filter(
+              (item) =>
+                item.customer_group_id === selectedGroupId &&
+                item.id !== selectedCustomer?.id
+            );
+
+            return (
+              <div className="form-field">
+                <label>
+                  نام شعبه
+                  <span style={{ color: "#dc2626", marginRight: 4 }}>*</span>
+                </label>
+
+                <select
+                  className="input"
+                  value={branchId}
+                  disabled={branches.length === 0}
+                  onChange={(e) => {
+                    const nextBranchId = e.target.value;
+                    setBranchId(nextBranchId);
+
+                    const branch = branches.find((item) => item.id === nextBranchId);
+                    setVisitor(branch?.visitor || selectedCustomer?.visitor || "");
+                  }}
+                >
+                  <option value="">
+                    {branches.length > 0
+                      ? "انتخاب شعبه"
+                      : "این مجموعه هنوز شعبه‌ای ندارد"}
+                  </option>
+
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+
+                {branches.length > 0 && (
+                  <div style={{ marginTop: 5, fontSize: 12, color: "#64748b" }}>
+                    فقط شعب زیرمجموعه «{selectedCustomer?.name}» در این فهرست نمایش داده می‌شوند.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="form-field">
             <label>ویزیتور</label>

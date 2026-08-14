@@ -96,6 +96,9 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editedItems, setEditedItems] = useState<any[]>([]);
+  const [groupParentName, setGroupParentName] = useState<string | null>(null);
+  const [isOrderAssignedToGroupParent, setIsOrderAssignedToGroupParent] =
+    useState(false);
   const [saving, setSaving] = useState(false);
   const [discounts, setDiscounts] = useState<any[]>([]);
 
@@ -216,7 +219,7 @@ export default function OrderDetailPage() {
 
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
-        .select(`*, customers(name, visitor)`)
+        .select(`*, customers(name, visitor, province, customer_group_id)`)
         .eq("id", id)
         .single();
 
@@ -250,6 +253,25 @@ export default function OrderDetailPage() {
       const finalData = { ...orderData, order_items: items || [] };
       setOrder(finalData);
       setEditedItems(finalData.order_items || []);
+
+      setGroupParentName(null);
+      setIsOrderAssignedToGroupParent(false);
+
+      if (orderData.customers?.customer_group_id) {
+        const { data: groupRow, error: groupError } = await supabase
+          .from("customer_groups")
+          .select("name,primary_customer_id")
+          .eq("id", orderData.customers.customer_group_id)
+          .maybeSingle();
+
+        if (!groupError && groupRow) {
+          setGroupParentName(groupRow.name || null);
+          setIsOrderAssignedToGroupParent(
+            String(orderData.customer_id) ===
+              String(groupRow.primary_customer_id)
+          );
+        }
+      }
 
       setSendDate(
         toPersianDateValue(orderData.send_date)
@@ -1188,8 +1210,33 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
             gap: 20,
           }}
         >
-          <div><strong>مشتری:</strong><br />{order.customers?.name || "-"}</div>
-          <div><strong>ویزیتور:</strong><br />{order.customers?.visitor || "-"}</div>
+          <div>
+            <strong>شعبه سفارش:</strong>
+            <br />
+            {order.customers?.name || "-"}
+          </div>
+          <div>
+            <strong>ویزیتور:</strong>
+            <br />
+            {order.customers?.visitor || "-"}
+          </div>
+
+          {isOrderAssignedToGroupParent && (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                padding: 12,
+                borderRadius: 8,
+                background: "#fff7ed",
+                border: "1px solid #fed7aa",
+                color: "#9a3412",
+              }}
+            >
+              این سفارش قدیمی مستقیماً برای مشتری مادر ثبت شده است.
+              {groupParentName ? ` مجموعه: ${groupParentName}` : ""}
+              سفارش‌های جدید این مجموعه باید فقط برای شعبه واقعی ثبت شوند.
+            </div>
+          )}
           <div>
             <strong>وضعیت:</strong>
             <br />

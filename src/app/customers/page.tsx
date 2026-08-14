@@ -19,6 +19,9 @@ type Customer = {
   visitor: string | null;
   responsible: string | null;
   active: boolean | null;
+  customer_group_id: string | null;
+  branch_count: number;
+  is_group_parent: boolean;
 };
 
 const emptyForm = {
@@ -50,32 +53,89 @@ export default function CustomersPage() {
   }, []);
 
   async function loadCustomers() {
-
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("customers")
-      .select(`
-        id,
-        name,
-        owner_name,
-        phone,
-        province,
-        address,
-        visitor,
-        responsible,
-        active
-      `)
-      .order("name");
+    const [
+      { data: customerRows, error: customerError },
+      { data: groupRows, error: groupError },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select(`
+          id,
+          name,
+          owner_name,
+          phone,
+          province,
+          address,
+          visitor,
+          responsible,
+          active,
+          customer_group_id
+        `)
+        .order("name"),
 
-    if (error) {
-      console.error(error);
-      alert("خطا در دریافت مشتریان:\n" + error.message);
+      supabase
+        .from("customer_groups")
+        .select("id, name, primary_customer_id"),
+    ]);
+
+    if (customerError) {
+      console.error(customerError);
+      alert("خطا در دریافت مشتریان:\n" + customerError.message);
       setLoading(false);
       return;
     }
 
-    setCustomers(data || []);
+    if (groupError) {
+      console.error(groupError);
+      alert("خطا در دریافت مجموعه‌های مشتریان:\n" + groupError.message);
+      setLoading(false);
+      return;
+    }
+
+    const groups = (groupRows || []) as Array<{
+      id: string;
+      name: string;
+      primary_customer_id: string;
+    }>;
+
+    const groupMap = new Map(
+      groups.map((group) => [group.id, group])
+    );
+
+    // صفحه اول فقط مشتری مادر / مشتری مستقل را نشان می‌دهد.
+    // شعبه‌ها مستقیماً در پرونده مجموعه دیده می‌شوند.
+    const visibleCustomers = (customerRows || [])
+      .filter((customer: any) => {
+        if (!customer.customer_group_id) return true;
+
+        const group = groupMap.get(customer.customer_group_id);
+
+        return group?.primary_customer_id === customer.id;
+      })
+      .map((customer: any) => {
+        const group = customer.customer_group_id
+          ? groupMap.get(customer.customer_group_id)
+          : undefined;
+
+        const branchCount = customer.customer_group_id
+          ? (customerRows || []).filter(
+              (branch: any) =>
+                branch.customer_group_id === customer.customer_group_id &&
+                branch.id !== customer.id
+            ).length
+          : 0;
+
+        return {
+          ...customer,
+          name: group?.name || customer.name,
+          branch_count: branchCount,
+          is_group_parent: Boolean(group),
+        } as Customer;
+      });
+
+    setCustomers(visibleCustomers);
     setLoading(false);
   }
 
@@ -298,6 +358,7 @@ export default function CustomersPage() {
                 <thead>
                   <tr>
                     <th>نام مشتری</th>
+                    <th>تعداد شعبه</th>
                     <th>مالک</th>
                     <th>تلفن</th>
                     <th>استان</th>
@@ -318,7 +379,25 @@ export default function CustomersPage() {
                         onClick={() => openCustomer(customer.id)}
                       >
 
-                        <td><strong>{customer.name}</strong></td>
+                        <td>
+                          <strong>{customer.name}</strong>
+                          {customer.is_group_parent && (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                fontSize: 12,
+                                color: "#64748b",
+                              }}
+                            >
+                              مجموعه مشتری
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {customer.branch_count > 0
+                            ? customer.branch_count.toLocaleString("fa-IR")
+                            : "-"}
+                        </td>
                         <td>{customer.owner_name || "-"}</td>
                         <td>{customer.phone || "-"}</td>
                         <td>{customer.province || "-"}</td>
@@ -368,7 +447,7 @@ export default function CustomersPage() {
                   {
                     filteredCustomers.length === 0 &&
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: 30 }}>
+                      <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
                         مشتری‌ای پیدا نشد
                       </td>
                     </tr>

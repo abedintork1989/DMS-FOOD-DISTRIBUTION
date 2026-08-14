@@ -8,8 +8,9 @@ import {
   Eye,
   Plus,
   Search,
-  Pencil,
   X,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 import AppShell from "@/components/AppShell";
@@ -22,6 +23,9 @@ type Customer = {
   name: string;
   province?: string | null;
   visitor?: string | null;
+  customer_group_id?: string | null;
+  primary_customer_id?: string | null;
+  parent_name?: string | null;
 };
 
 type Product = {
@@ -76,17 +80,18 @@ type Order = {
   customer_name?: string;
   visitor?: string | null;
   status: string;
-  cancelled_from?: string | null;
-  cancelled_at?: string | null;
   invoice_total?: number;
   created_at: string;
   send_date?: string | null;
   delivery_date?: string | null;
+  branch_name?: string | null;
 
   customers?: {
     name: string;
     province?: string | null;
     visitor: string | null;
+    customer_group_id?: string | null;
+    parent_name?: string | null;
   };
 
   order_items?: OrderItem[];
@@ -147,23 +152,7 @@ function formatDate(value: string) {
 /* وضعیت سفارش */
 /* ------------------------------------------------ */
 
-function statusInfo(status: string, cancelledFrom?: string | null) {
-  if (status === "cancelled") {
-    const originLabel =
-      cancelledFrom === "pending"
-        ? "در انتظار تایید"
-        : cancelledFrom === "approved"
-        ? "تایید شده"
-        : cancelledFrom === "delivered"
-        ? "تحویل داده شد"
-        : cancelledFrom || "نامشخص";
-
-    return {
-      label: `ابطال (${originLabel})`,
-      className: "danger",
-    };
-  }
-
+function statusInfo(status: string) {
   switch (status) {
     case "pending":
       return {
@@ -181,6 +170,12 @@ function statusInfo(status: string, cancelledFrom?: string | null) {
       return {
         label: "تحویل شده",
         className: "info",
+      };
+
+    case "cancelled":
+      return {
+        label: "باطل شده",
+        className: "danger",
       };
 
     default:
@@ -208,6 +203,8 @@ export default function OrdersPage() {
   const [detail, setDetail] = useState<Order | null>(null);
 
   const [customerId, setCustomerId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [branchCustomers, setBranchCustomers] = useState<Customer[]>([]);
   const [visitor, setVisitor] = useState("");
 
   const [search, setSearch] = useState("");
@@ -240,18 +237,71 @@ export default function OrdersPage() {
   }
 
   async function loadCustomers() {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("id,name,province,visitor")
-      .order("name", { ascending: true });
+    const [
+      { data: customerRows, error: customerError },
+      { data: groupRows, error: groupError },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("id,name,province,visitor,customer_group_id")
+        .order("name", { ascending: true }),
 
-    if (error) {
-      console.error(error);
-      alert(`خطا در دریافت مشتریان: ${error.message}`);
+      supabase
+        .from("customer_groups")
+        .select("id,name,primary_customer_id"),
+    ]);
+
+    if (customerError) {
+      console.error(customerError);
+      alert(`خطا در دریافت مشتریان: ${customerError.message}`);
       return;
     }
 
-    setCustomers((data || []) as Customer[]);
+    if (groupError) {
+      console.error(groupError);
+      alert(`خطا در دریافت مجموعه مشتریان: ${groupError.message}`);
+      return;
+    }
+
+    const groups = (groupRows || []) as Array<{
+      id: string;
+      name: string;
+      primary_customer_id: string;
+    }>;
+
+    const customerRowsTyped = (customerRows || []) as Customer[];
+
+    const parentByGroupId = new Map(
+      groups.map((group) => [
+        group.id,
+        group,
+      ])
+    );
+
+    // در ثبت سفارش فقط نام مجموعه / مشتری مادر در لیست اول نمایش داده می‌شود.
+    const parents = customerRowsTyped
+      .filter((customer) => {
+        if (!customer.customer_group_id) return true;
+
+        const group = parentByGroupId.get(customer.customer_group_id);
+        return group?.primary_customer_id === customer.id;
+      })
+      .map((customer) => {
+        const group = customer.customer_group_id
+          ? parentByGroupId.get(customer.customer_group_id)
+          : undefined;
+
+        return {
+          ...customer,
+          name: group?.name || customer.name,
+          primary_customer_id: group?.primary_customer_id || customer.id,
+        };
+      });
+
+    setCustomers(parents);
+
+    // شعبه‌ها برای انتخاب بعد از انتخاب مجموعه نگه داشته می‌شوند.
+    setBranchCustomers(customerRowsTyped);
   }
 
   async function loadProducts() {
@@ -310,20 +360,52 @@ export default function OrdersPage() {
       return;
     }
 
-   console.log("FULL DATA:", data);
+    const { data: groupRows } = await supabase
+      .from("customer_groups")
+      .select("id,name,primary_customer_id");
 
-const visibleOrders = (data || []).filter((order: any) => {
-  if (order.status === "pending" || order.status === "approved") {
-    return true;
-  }
+    const { data: allCustomers } = await supabase
+      .from("customers")
+      .select("id,name,customer_group_id");
 
-  return (
-    order.status === "cancelled" &&
-    ["pending", "approved"].includes(order.cancelled_from || "")
-  );
-});
+    const groups = (groupRows || []) as Array<{
+      id: string;
+      name: string;
+      primary_customer_id: string;
+    }>;
 
-setOrders(visibleOrders as Order[]);
+    const customerMap = new Map(
+      (allCustomers || []).map((customer: any) => [
+        customer.id,
+        customer,
+      ])
+    );
+
+    const groupMap = new Map(
+      groups.map((group) => [group.id, group])
+    );
+
+    const normalizedOrders = (data || []).map((order: any) => {
+      const customer = customerMap.get(order.customer_id);
+      const group = customer?.customer_group_id
+        ? groupMap.get(customer.customer_group_id)
+        : undefined;
+
+      return {
+        ...order,
+        customers: {
+          ...(order.customers || {}),
+          parent_name: group?.name || order.customers?.name || order.customer_name,
+          customer_group_id: customer?.customer_group_id || null,
+        },
+        branch_name:
+          group && group.primary_customer_id !== order.customer_id
+            ? order.customers?.name || order.customer_name || "-"
+            : "-",
+      };
+    });
+
+    setOrders(normalizedOrders as Order[]);
   }
 
   /* ------------------------------------------------ */
@@ -368,12 +450,29 @@ setOrders(visibleOrders as Order[]);
 
   async function handleCustomerChange(id: string) {
     setCustomerId(id);
+    setBranchId("");
 
     const customer = customers.find(
       (item) => item.id === id
     );
 
     setVisitor(customer?.visitor || "");
+
+    const groupId = customer?.customer_group_id || null;
+
+    const branches = groupId
+      ? branchCustomers.filter(
+          (item) =>
+            item.customer_group_id === groupId &&
+            item.id !== customer?.id
+        )
+      : [];
+
+    setBranchCustomers((previous) => previous);
+
+    if (branches.length > 0) {
+      setBranchId("");
+    }
 
     await loadCustomerDiscounts(id);
   }
@@ -522,6 +621,7 @@ setOrders(visibleOrders as Order[]);
 
   function openOrderModal() {
     setCustomerId("");
+    setBranchId("");
     setVisitor("");
     setDiscounts([]);
     setSearch("");
@@ -534,6 +634,7 @@ setOrders(visibleOrders as Order[]);
 
     setModal(false);
     setCustomerId("");
+    setBranchId("");
     setVisitor("");
     setDiscounts([]);
     setSearch("");
@@ -555,12 +656,53 @@ setOrders(visibleOrders as Order[]);
       return;
     }
 
-    const customer = customers.find(
+    const mother = customers.find(
       (item) => item.id === customerId
     );
 
-    if (!customer) {
-      alert("مشتری انتخاب‌شده پیدا نشد.");
+    if (!mother) {
+      alert("مشتری / مجموعه انتخاب‌شده پیدا نشد.");
+      return;
+    }
+
+    const availableBranches = mother.customer_group_id
+      ? branchCustomers.filter(
+          (item) =>
+            item.customer_group_id === mother.customer_group_id &&
+            item.id !== mother.id
+        )
+      : [];
+
+    const isGroupParent = Boolean(mother.customer_group_id);
+
+    if (isGroupParent && !branchId) {
+      alert("این مشتری یک مجموعه است. برای ثبت سفارش باید ابتدا شعبه را انتخاب کنید.");
+      return;
+    }
+
+    if (isGroupParent && availableBranches.length === 0) {
+      alert("برای این مجموعه هنوز هیچ شعبه‌ای ثبت نشده است.");
+      return;
+    }
+
+    const actualCustomerId =
+      isGroupParent ? branchId : mother.id;
+
+    // مشتری مادرِ یک مجموعه هیچ‌وقت مجاز به دریافت سفارش مستقیم نیست.
+    if (isGroupParent && actualCustomerId === mother.id) {
+      alert("برای این مجموعه فقط شعبه واقعی قابل انتخاب است.");
+      return;
+    }
+
+    const actualCustomer =
+      actualCustomerId === mother.id
+        ? mother
+        : branchCustomers.find(
+            (item) => item.id === actualCustomerId
+          );
+
+    if (!actualCustomer) {
+      alert("شعبه انتخاب‌شده پیدا نشد.");
       return;
     }
 
@@ -573,9 +715,9 @@ setOrders(visibleOrders as Order[]);
         await supabase
           .from("orders")
           .insert({
-            customer_id: customerId,
-            customer_name: customer.name,
-            visitor: visitor || customer.visitor || null,
+            customer_id: actualCustomerId,
+            customer_name: actualCustomer.name,
+            visitor: visitor || actualCustomer.visitor || mother.visitor || null,
             status: "pending",
             total: orderTotal,
           })
@@ -703,23 +845,13 @@ setOrders(visibleOrders as Order[]);
   }
 
   /* ------------------------------------------------ */
-  /* ابطال سفارش - بدون حذف رکورد */
-  /* ------------------------------------------------ */
+  /* حذف سفارش */
+/* ------------------------------------------------ */
 
-  async function cancelOrder(order: Order) {
-    if (!["pending", "approved"].includes(order.status)) {
-      alert("این سفارش در این مرحله قابل ابطال از صفحه سفارشات نیست.");
-      return;
-    }
-
-    const statusLabel =
-      order.status === "pending"
-        ? "در انتظار تایید"
-        : "تایید شده";
-
+  async function deleteOrder(id: string) {
     if (
       !confirm(
-        `سفارش از مرحله «${statusLabel}» ابطال شود؟\n\nسفارش حذف نمی‌شود و به صورت «ابطال (${statusLabel})» باقی می‌ماند.`
+        "آیا از حذف کامل این سفارش مطمئن هستید؟"
       )
     ) {
       return;
@@ -727,38 +859,36 @@ setOrders(visibleOrders as Order[]);
 
     const { error } = await supabase
       .from("orders")
-      .update({
-        status: "cancelled",
-        cancelled_from: order.status,
-        cancelled_at: new Date().toISOString(),
-      })
-      .eq("id", order.id)
-      .eq("status", order.status);
+      .delete()
+      .eq("id", id);
 
     if (error) {
       console.error(error);
-      alert(`خطا در ابطال سفارش: ${error.message}`);
+      alert(
+        `خطا در حذف سفارش: ${error.message}`
+      );
       return;
     }
 
-    if (detail?.id === order.id) {
-      setDetail({
-        ...detail,
-        status: "cancelled",
-        cancelled_from: order.status,
-        cancelled_at: new Date().toISOString(),
-      });
-    }
+    setDetail(null);
 
     await loadOrders();
   }
-
   /* ------------------------------------------------ */
   /* ستون‌های جدول سفارشات با فیلتر و مرتب‌سازی */
   /* ------------------------------------------------ */
 
-  function orderRowClass(_row: Order) {
-    return "";
+  function orderRowClass(row: Order) {
+    switch (row.status) {
+      case "pending":
+        return "order-row-pending";
+      case "approved":
+        return "order-row-approved";
+      case "delivered":
+        return "order-row-delivered";
+      default:
+        return "";
+    }
   }
 
   const orderTableColumns: DataTableColumn<Order>[] = [
@@ -781,7 +911,20 @@ setOrders(visibleOrders as Order[]);
       filterable: true,
       searchable: true,
       sortable: true,
-      accessor: (row) => row.customers?.name || row.customer_name || "-",
+      accessor: (row) =>
+        row.customers?.parent_name ||
+        row.customers?.name ||
+        row.customer_name ||
+        "-",
+    },
+    {
+      key: "branch",
+      title: "شعبه",
+      width: 100,
+      filterable: true,
+      searchable: true,
+      sortable: true,
+      accessor: (row) => row.branch_name || "-",
     },
     {
       key: "province",
@@ -839,74 +982,34 @@ setOrders(visibleOrders as Order[]);
       filterable: true,
       searchable: true,
       sortable: true,
-      accessor: (row) => statusInfo(row.status, row.cancelled_from).label,
+      accessor: (row) => statusInfo(row.status).label,
       render: (_value, row) => {
-        const status = statusInfo(row.status, row.cancelled_from);
-
-        const background =
-          row.status === "pending"
-            ? "#fffbe8"
-            : row.status === "approved"
-            ? "#fed7aa"
-            : row.status === "delivered"
-            ? "#dcfce7"
-            : row.status === "cancelled"
-            ? "#fee2e2"
-            : "#f8fafc";
-
-        const foreground =
-          row.status === "pending"
-            ? "#92400e"
-            : row.status === "approved"
-            ? "#9a3412"
-            : row.status === "delivered"
-            ? "#166534"
-            : row.status === "cancelled"
-            ? "#991b1b"
-            : "#475569";
+        const status = statusInfo(row.status);
 
         return (
-          <div
-            style={{
-              width: "calc(100% + 12px)",
-              minHeight: "100%",
-              margin: "-8px -6px",
-              padding: "8px 6px",
-              boxSizing: "border-box",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background,
-              color: foreground,
-              fontWeight: 700,
-              textAlign: "center",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <span className={`badge ${status.className}`}>
             {status.label}
-          </div>
+          </span>
         );
       },
     },
     {
       key: "actions",
       title: "عملیات",
-      width: 120,
+      width: 90,
       filterable: false,
       searchable: false,
       sortable: false,
       accessor: () => "",
       render: (_value, row) => (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-small"
-            onClick={() => router.push(`/orders/${row.id}`)}
-          >
-            <Eye size={15} />
-            مشاهده / ویرایش
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => router.push(`/orders/${row.id}`)}
+        >
+          <Eye size={15} />
+          مشاهده
+        </button>
       ),
     },
   ];
@@ -920,55 +1023,36 @@ setOrders(visibleOrders as Order[]);
   return (
     <>
       <style jsx global>{`
-        .orders-page-compact {
-          width: 100% !important;
-          max-width: 100% !important;
-          box-sizing: border-box !important;
-          overflow: visible !important;
-        }
-
-        .orders-page-compact .table-wrap {
-          width: 100% !important;
-          max-width: 100% !important;
-          overflow: visible !important;
-        }
-
-        .orders-page-compact .table-wrap,
-        .orders-page-compact .table-wrap > div {
-          overflow: visible !important;
-        }
-
         .orders-page-compact table {
           width: 100% !important;
-          max-width: 100% !important;
           table-layout: fixed !important;
         }
 
         .orders-page-compact th,
         .orders-page-compact td {
-          padding: 7px 5px !important;
-          font-size: clamp(11px, 0.82vw, 14px) !important;
-          line-height: 1.35 !important;
+          padding: 8px 6px !important;
+          font-size: 13px !important;
           white-space: nowrap;
-          box-sizing: border-box !important;
-        }
-
-        .orders-page-compact th {
-          position: relative !important;
-          overflow: visible !important;
-          z-index: 20 !important;
-        }
-
-        .orders-page-compact td {
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
-        .orders-page-compact th [role="dialog"],
-        .orders-page-compact th [data-radix-popper-content-wrapper],
-        .orders-page-compact th .filter-menu,
-        .orders-page-compact th .filter-dropdown {
-          z-index: 99999 !important;
+        .orders-page-compact .table-wrap {
+          width: 100% !important;
+          overflow-x: hidden !important;
+        }
+
+        .order-row-pending td {
+          background: #fffbe8 !important;
+        }
+        .order-row-approved td {
+          background: #fed7aa !important;
+        }
+        .order-row-delivered td {
+          background: #dcfce7 !important;
+        }
+        .order-row-approved:hover td {
+          background: #fdba74 !important;
         }
       `}</style>
       <AppShell>
@@ -1073,7 +1157,7 @@ setOrders(visibleOrders as Order[]);
               }}
             >
               <div className="form-field">
-                <label>مشتری</label>
+                <label>مجموعه / مشتری</label>
 
                 <select
                   className="input"
@@ -1085,7 +1169,7 @@ setOrders(visibleOrders as Order[]);
                   }
                 >
                   <option value="">
-                    انتخاب مشتری
+                    انتخاب مجموعه / مشتری
                   </option>
 
                   {customers.map((customer) => (
@@ -1093,10 +1177,96 @@ setOrders(visibleOrders as Order[]);
                       key={customer.id}
                       value={customer.id}
                     >
-                      {customer.name}
+                      {customer.customer_group_id
+                        ? `${customer.name} — انتخاب شعبه الزامی است`
+                        : customer.name}
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {customerId && (() => {
+                const mother = customers.find(
+                  (item) => item.id === customerId
+                );
+
+                const branches = mother?.customer_group_id
+                  ? branchCustomers.filter(
+                      (item) =>
+                        item.customer_group_id === mother.customer_group_id &&
+                        item.id !== mother.id
+                    )
+                  : [];
+
+                if (branches.length === 0) {
+                  return (
+                    <div
+                      className="form-field"
+                      style={{
+                        gridColumn: "1 / -1",
+                        color: "#b91c1c",
+                      }}
+                    >
+                      <label>شعبه</label>
+                      <div
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          background: "#fef2f2",
+                          border: "1px solid #fecaca",
+                        }}
+                      >
+                        این مجموعه هنوز شعبه‌ای ندارد؛ سفارش برای مشتری مادر مجاز نیست.
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="form-field">
+                    <label>شعبه واقعی سفارش</label>
+                    <select
+                      className="input"
+                      value={branchId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        setBranchId(selectedId);
+
+                        const branch = branches.find(
+                          (item) => item.id === selectedId
+                        );
+
+                        if (branch?.visitor) {
+                          setVisitor(branch.visitor);
+                        }
+                      }}
+                    >
+                      <option value="">انتخاب شعبه</option>
+                      {branches.map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
+
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  marginTop: -8,
+                  marginBottom: 4,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  color: "#475569",
+                  fontSize: 12,
+                }}
+              >
+                برای مجموعه‌ها، نام بالا فقط «مجموعه مادر» است و هیچ سفارشی
+                به آن ثبت نمی‌شود؛ سفارش فقط با انتخاب یک شعبه واقعی ثبت خواهد شد.
               </div>
 
               <div className="form-field">
@@ -1735,11 +1905,17 @@ setOrders(visibleOrders as Order[]);
                 marginTop: 20,
               }}
             >
-              {detail.status === "pending" && (
+              {detail.status ===
+                "pending" && (
                 <>
                   <button
                     className="btn btn-primary"
-                    onClick={() => changeStatus(detail.id, "approved")}
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "approved"
+                      )
+                    }
                   >
                     <Check size={16} />
                     تایید سفارش
@@ -1747,7 +1923,12 @@ setOrders(visibleOrders as Order[]);
 
                   <button
                     className="btn btn-danger"
-                    onClick={() => cancelOrder(detail)}
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "cancelled"
+                      )
+                    }
                   >
                     <X size={16} />
                     ابطال سفارش
@@ -1755,26 +1936,70 @@ setOrders(visibleOrders as Order[]);
                 </>
               )}
 
-              {detail.status === "approved" && (
-                <button
-                  className="btn btn-danger"
-                  onClick={() => cancelOrder(detail)}
-                >
-                  <X size={16} />
-                  ابطال سفارش
-                </button>
+              {detail.status ===
+                "approved" && (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "delivered"
+                      )
+                    }
+                  >
+                    <Check size={16} />
+                    تایید تحویل کامل
+                  </button>
+
+                  <button
+                    className="btn btn-danger"
+                    onClick={() =>
+                      changeStatus(
+                        detail.id,
+                        "cancelled"
+                      )
+                    }
+                  >
+                    <X size={16} />
+                    ابطال سفارش
+                  </button>
+                </>
               )}
 
-              {detail.status === "cancelled" && (
+              {detail.status ===
+                "cancelled" && (
                 <span
                   style={{
                     color: "#dc2626",
                     fontWeight: 700,
                   }}
                 >
-                  {statusInfo(detail.status, detail.cancelled_from).label}
+                  این سفارش باطل شده است.
                 </span>
               )}
+
+              {detail.status ===
+                "delivered" && (
+                <span
+                  style={{
+                    color: "#16a34a",
+                    fontWeight: 700,
+                  }}
+                >
+                  این سفارش تحویل شده است.
+                </span>
+              )}
+
+              <button
+                className="btn btn-danger"
+                onClick={() =>
+                  deleteOrder(detail.id)
+                }
+              >
+                <Trash2 size={15} />
+                حذف سفارش
+              </button>
             </div>
           </div>
         </div>

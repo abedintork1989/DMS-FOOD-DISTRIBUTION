@@ -65,8 +65,8 @@ export default function Sidebar() {
       <Link href="/dashboard" className="premium-brand" aria-label="صفحه اصلی سیستم پخش">
         <div className="premium-logo"><div className="logo-shape">DMS</div></div>
         <div className="brand-text">
-          <div className="brand-title">سیستم پخش</div>
-          <div className="brand-subtitle">Distribution Management System</div>
+          <div className="brand-title"> مدیریت هوشمند فروش</div>
+          <div className="brand-subtitle">Smart Sales Management</div>
         </div>
       </Link>
 

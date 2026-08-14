@@ -1,7 +1,7 @@
 "use client";
 import BackButton from "@/components/BackButton";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Trash2,
   Upload,
@@ -58,6 +58,24 @@ type Customer = {
 
 
 
+type CustomerGroup = {
+  id: string;
+  name: string;
+  primary_customer_id: string;
+  created_at?: string | null;
+};
+
+type BranchCustomer = {
+  id: string;
+  name: string;
+  province: string | null;
+  address: string | null;
+  phone: string | null;
+  visitor: string | null;
+  responsible: string | null;
+  customer_group_id: string | null;
+};
+
 type Discount = {
 
 
@@ -101,6 +119,7 @@ export default function CustomerDetailPage(){
 
 const params = useParams();
 const router = useRouter();
+const searchParams = useSearchParams();
 
 
 
@@ -111,6 +130,8 @@ const customerId =
 
 
 const isNewCustomer = customerId === "new";
+const initialGroupId = searchParams.get("groupId") || "";
+const isBranchCreate = isNewCustomer && Boolean(initialGroupId);
 
 
 
@@ -160,8 +181,22 @@ useState("");
 const [discountPercent,setDiscountPercent]=
 useState(0);
 
+const [customerGroup,setCustomerGroup]=
+useState<CustomerGroup | null>(null);
+
+const [branchCustomers,setBranchCustomers]=
+useState<BranchCustomer[]>([]);
+
+const [groupLoading,setGroupLoading]=
+useState(false);
 
 
+
+
+useEffect(() => {
+  if(!customerId || isNewCustomer) return;
+  loadDiscounts();
+}, [customerId, customerGroup?.id, isNewCustomer]);
 
 const [form,setForm]=useState({
 
@@ -193,7 +228,8 @@ entry_fee:0,
 settlement_days:0,
 
 
-notes:""
+notes:"",
+customer_group_id: initialGroupId || null
 
 
 });
@@ -227,7 +263,8 @@ if(isNewCustomer){
   visitor:"",
   entry_fee:0,
   settlement_days:0,
-  notes:""
+  notes:"",
+  customer_group_id: initialGroupId || null
  });
 
 
@@ -242,17 +279,17 @@ if(isNewCustomer){
 loadCustomer();
 
 
-loadDiscounts();
-
-
 loadCategories();
 
 
 loadMedia();
 
 
+loadCustomerGroup();
 
-},[customerId]);
+
+
+},[customerId, initialGroupId]);
 
 
 
@@ -333,7 +370,8 @@ entry_fee:data.entry_fee || 0,
 settlement_days:data.settlement_days ?? 0,
 
 
-notes:data.notes || ""
+notes:data.notes || "",
+customer_group_id:data.customer_group_id || null
 
 
 });
@@ -344,6 +382,162 @@ notes:data.notes || ""
 
 
 
+
+async function loadCustomerGroup(){
+  if(isNewCustomer || !customerId){
+    setCustomerGroup(null);
+    setBranchCustomers([]);
+    return;
+  }
+
+  setGroupLoading(true);
+
+  try{
+    const {data:customerRow,error:customerError}=await supabase
+      .from("customers")
+      .select("id,name,customer_group_id")
+      .eq("id",customerId)
+      .single();
+
+    if(customerError){
+      console.error(customerError);
+      setCustomerGroup(null);
+      setBranchCustomers([]);
+      return;
+    }
+
+    let groupId = customerRow?.customer_group_id || null;
+
+    if(!groupId){
+      const {data:ownedGroup}=await supabase
+        .from("customer_groups")
+        .select("id,name,primary_customer_id,created_at")
+        .eq("primary_customer_id",customerId)
+        .maybeSingle();
+
+      if(ownedGroup){
+        groupId=ownedGroup.id;
+      }
+    }
+
+    if(!groupId){
+      setCustomerGroup(null);
+      setBranchCustomers([]);
+      return;
+    }
+
+    const {data:groupData,error:groupError}=await supabase
+      .from("customer_groups")
+      .select("id,name,primary_customer_id,created_at")
+      .eq("id",groupId)
+      .single();
+
+    if(groupError){
+      console.error(groupError);
+      setCustomerGroup(null);
+      setBranchCustomers([]);
+      return;
+    }
+
+    const isGroupParent =
+      groupData.primary_customer_id === customerId;
+
+    if (isGroupParent) {
+      const {data:branches,error:branchError}=await supabase
+        .from("customers")
+        .select("id,name,province,address,phone,visitor,responsible,customer_group_id")
+        .eq("customer_group_id",groupId)
+        .neq("id",customerId)
+        .order("name",{ascending:true});
+
+      if(branchError){
+        console.error(branchError);
+        setBranchCustomers([]);
+      }else{
+        setBranchCustomers((branches || []) as BranchCustomer[]);
+      }
+    } else {
+      // در پرونده یک شعبه، لیست شعب دیگر نمایش داده نمی‌شود.
+      // برای دیدن کل شعب، از پرونده مشتری مادر استفاده می‌شود.
+      setBranchCustomers([]);
+    }
+
+    setCustomerGroup(groupData as CustomerGroup);
+  }finally{
+    setGroupLoading(false);
+  }
+}
+
+async function createCustomerGroup(){
+  if(isNewCustomer || !customerId){
+    alert("ابتدا مشتری مادر را ذخیره کنید.");
+    return;
+  }
+
+  if(customerGroup){
+    alert("این مشتری از قبل عضو یک مجموعه است.");
+    return;
+  }
+
+  const groupName=form.name.trim();
+
+  if(!groupName){
+    alert("ابتدا نام فروشگاه / مجموعه را وارد کنید.");
+    return;
+  }
+
+  if(!confirm(`مجموعه «${groupName}» ساخته شود و این مشتری به عنوان مشتری مادر آن ثبت شود؟`)){
+    return;
+  }
+
+  const {data,error}=await supabase
+    .from("customer_groups")
+    .insert({
+      name:groupName,
+      primary_customer_id:customerId
+    })
+    .select()
+    .single();
+
+  if(error){
+    console.error(error);
+    alert("خطا در ساخت مجموعه:\n"+error.message);
+    return;
+  }
+
+  const {error:updateError}=await supabase
+    .from("customers")
+    .update({customer_group_id:data.id})
+    .eq("id",customerId);
+
+  if(updateError){
+    await supabase
+      .from("customer_groups")
+      .delete()
+      .eq("id",data.id);
+
+    console.error(updateError);
+    alert("خطا در اتصال مشتری به مجموعه:\n"+updateError.message);
+    return;
+  }
+
+  alert("مجموعه با موفقیت ساخته شد.");
+  await loadCustomer();
+  await loadCustomerGroup();
+}
+
+function addBranch(){
+  if(!customerGroup){
+    alert("ابتدا این مشتری را به عنوان مجموعه مادر ثبت کنید.");
+    return;
+  }
+
+  router.push(`/customers/new?groupId=${encodeURIComponent(customerGroup.id)}`);
+}
+
+function openBranch(branchId:string){
+  router.push(`/customers/${branchId}`);
+}
 
 async function loadCategories(){
 
@@ -397,45 +591,25 @@ setCategories(list);
 
 async function loadDiscounts(){
 
-
+const discountCustomerId =
+  customerGroup?.primary_customer_id || customerId;
 
 const {data,error}=await supabase
-
-
 .from("customer_group_discounts")
-
-
 .select("*")
-
-
-.eq("customer_id",customerId);
-
-
-
+.eq("customer_id",discountCustomerId)
+.order("category",{ascending:true});
 
 if(error){
-
-
 console.error(error);
-
-
 alert(
 "خطا در دریافت تخفیف‌های مشتری:\n"+
 error.message
 );
-
-
 return;
-
-
 }
 
-
-
-
 setDiscounts(data || []);
-
-
 
 }
 
@@ -521,6 +695,7 @@ const {data,error}=await supabase
  entry_fee:Number(form.entry_fee) || 0,
  settlement_days:Number(form.settlement_days) || 0,
  notes:form.notes || null,
+ customer_group_id: form.customer_group_id || initialGroupId || null,
  active:true
 })
 .select()
@@ -584,7 +759,8 @@ entry_fee:Number(form.entry_fee),
 settlement_days:Number(form.settlement_days),
 
 
-notes:form.notes
+notes:form.notes,
+customer_group_id: form.customer_group_id || null
 
 
 })
@@ -632,7 +808,10 @@ loadCustomer();
 
 async function addDiscount(){
 
-
+if(customerGroup && customerGroup.primary_customer_id !== customerId){
+alert("تخفیف شعبه از مشتری مادر گرفته می‌شود و جداگانه قابل ثبت نیست.");
+return;
+}
 
 if(!discountCategory){
 
@@ -1012,7 +1191,13 @@ customer
 }
 
 
-subtitle="مدیریت اطلاعات، قراردادها و تخفیف مشتری"
+subtitle={
+  isBranchCreate
+    ? "ثبت اطلاعات اصلی شعبه"
+    : customerGroup && customerGroup.primary_customer_id !== customerId
+    ? "مدیریت شعبه و اطلاعات این مشتری"
+    : "مدیریت اطلاعات، قراردادها، تخفیف و ساختار مجموعه مشتری"
+}
 
 
 />
@@ -1033,6 +1218,22 @@ marginBottom:20
 <h3>
 اطلاعات مشتری
 </h3>
+
+{isBranchCreate && (
+  <div
+    style={{
+      marginBottom:16,
+      padding:12,
+      borderRadius:8,
+      background:"#eff6ff",
+      border:"1px solid #bfdbfe",
+      color:"#1e3a8a"
+    }}
+  >
+    این مشتری به‌عنوان شعبه زیرمجموعه مجموعه مادر ثبت می‌شود.
+    تخفیف‌های گروه کالا و فایل‌های شعبه از مشتری مادر استفاده می‌شوند.
+  </div>
+)}
 
 
 
@@ -1440,6 +1641,25 @@ province:e.target.value
       </div>
 
 
+      <div className="form-field">
+        <label>
+          رابطه با مجموعه
+        </label>
+        <input
+          className="input"
+          disabled
+          value={
+            customerGroup
+              ? customerGroup.primary_customer_id === customerId
+                ? "مشتری مادر / مجموعه"
+                : `شعبه زیرمجموعه «${customerGroup.name}»`
+              : initialGroupId
+              ? "در حال اتصال به مجموعه"
+              : "مشتری مستقل"
+          }
+        />
+      </div>
+
       <div className="form-field full">
         <label>
           توضیحات
@@ -1536,6 +1756,184 @@ onClick={()=>setEdit(true)}
 
 
 {/* ==========================
+        مجموعه و شعب
+========================== */}
+
+<div className="panel">
+  <div
+    style={{
+      display:"flex",
+      justifyContent:"space-between",
+      alignItems:"center",
+      gap:12,
+      flexWrap:"wrap",
+      marginBottom:16
+    }}
+  >
+    <div>
+      <h3 style={{margin:0}}>
+        مجموعه و شعب مشتری
+      </h3>
+      <div style={{marginTop:6,color:"#64748b",fontSize:13}}>
+        هر شعبه همچنان یک مشتری مستقل در سیستم است و فقط به مجموعه مادر متصل می‌شود.
+      </div>
+    </div>
+
+    {!isNewCustomer && !customerGroup && (
+      <button
+        className="btn btn-primary"
+        onClick={createCustomerGroup}
+      >
+        <Plus size={16}/>
+        ساخت مجموعه از این مشتری
+      </button>
+    )}
+
+    {!isNewCustomer && customerGroup && (
+      <button
+        className="btn btn-primary"
+        onClick={addBranch}
+      >
+        <Plus size={16}/>
+        افزودن شعبه
+      </button>
+    )}
+  </div>
+
+  {isNewCustomer ? (
+    <div
+      style={{
+        padding:14,
+        borderRadius:10,
+        background:"#f8fafc",
+        border:"1px solid #e2e8f0",
+        color:"#475569"
+      }}
+    >
+      {initialGroupId
+        ? "این مشتری جدید به عنوان یک شعبه برای مجموعه انتخاب‌شده ثبت خواهد شد."
+        : "برای ساخت شعبه، ابتدا مشتری مادر را ذخیره کنید و از داخل همان مشتری روی «افزودن شعبه» بزنید."}
+    </div>
+  ) : groupLoading ? (
+    <div style={{padding:20,color:"#64748b"}}>
+      در حال دریافت ساختار مجموعه...
+    </div>
+  ) : customerGroup ? (
+    <>
+      <div
+        style={{
+          display:"grid",
+          gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",
+          gap:12,
+          marginBottom:18
+        }}
+      >
+        <div style={{padding:14,borderRadius:10,background:"#eff6ff",border:"1px solid #bfdbfe"}}>
+          <div style={{fontSize:12,color:"#64748b"}}>نام مجموعه</div>
+          <strong>{customerGroup.name}</strong>
+        </div>
+
+        <div style={{padding:14,borderRadius:10,background:"#f0fdf4",border:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:12,color:"#64748b"}}>نقش مشتری فعلی</div>
+          <strong>
+            {customerGroup.primary_customer_id === customerId
+              ? "مشتری مادر"
+              : "شعبه"}
+          </strong>
+        </div>
+
+        <div style={{padding:14,borderRadius:10,background:"#fff7ed",border:"1px solid #fed7aa"}}>
+          <div style={{fontSize:12,color:"#64748b"}}>تعداد شعب</div>
+          <strong>{branchCustomers.length.toLocaleString("fa-IR")}</strong>
+        </div>
+      </div>
+
+      {customerGroup.primary_customer_id !== customerId ? (
+        <div
+          style={{
+            padding:14,
+            borderRadius:10,
+            background:"#f8fafc",
+            border:"1px solid #e2e8f0"
+          }}
+        >
+          <div style={{marginBottom:10}}>
+            <strong>مشتری مادر / مجموعه:</strong>{" "}
+            {customerGroup.name}
+          </div>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => openBranch(customerGroup.primary_customer_id)}
+          >
+            مشاهده پرونده مجموعه
+          </button>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>نام شعبه</th>
+                <th>آدرس</th>
+                <th>استان</th>
+                <th>تلفن</th>
+                <th>ویزیتور</th>
+                <th>مسئول</th>
+                <th>عملیات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {branchCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>
+                    هنوز شعبه‌ای برای این مجموعه ثبت نشده است.
+                  </td>
+                </tr>
+              ) : (
+                branchCustomers.map((branch) => (
+                  <tr key={branch.id}>
+                    <td style={{fontWeight:700}}>{branch.name}</td>
+                    <td>{branch.address || "-"}</td>
+                    <td>{branch.province || "-"}</td>
+                    <td>{branch.phone || "-"}</td>
+                    <td>{branch.visitor || "-"}</td>
+                    <td>{branch.responsible || "-"}</td>
+                    <td>
+                      <button
+                        className="btn btn-secondary btn-small"
+                        onClick={() => openBranch(branch.id)}
+                      >
+                        مشاهده شعبه
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  ) : (
+    <div
+      style={{
+        padding:14,
+        borderRadius:10,
+        background:"#fffbeb",
+        border:"1px solid #fde68a",
+        color:"#854d0e"
+      }}
+    >
+      این مشتری هنوز عضو هیچ مجموعه‌ای نیست. برای مجموعه‌ای که چند شعبه دارد،
+      ابتدا روی «ساخت مجموعه از این مشتری» بزنید؛ سپس از همین قسمت شعبه‌ها را اضافه کنید.
+    </div>
+  )}
+</div>
+
+{!isBranchCreate && (
+  <>
+{/* ==========================
         تخفیف گروهی
 ========================== */}
 
@@ -1549,6 +1947,23 @@ onClick={()=>setEdit(true)}
 <h3>
 تخفیف گروه‌های کالا
 </h3>
+
+{customerGroup && customerGroup.primary_customer_id !== customerId && (
+<div
+style={{
+marginTop:10,
+marginBottom:14,
+padding:12,
+borderRadius:8,
+background:"#eff6ff",
+border:"1px solid #bfdbfe",
+color:"#1e3a8a"
+}}
+>
+این شعبه از درصدهای تخفیف مشتری مادر «{customerGroup.name}» استفاده می‌کند.
+تخفیف شعبه جداگانه نیست و تغییر آن فقط از پرونده مشتری مادر انجام می‌شود.
+</div>
+)}
 
 
 
@@ -1571,6 +1986,9 @@ onClick={()=>setEdit(true)}
 
 
 className="input"
+
+
+disabled={Boolean(customerGroup && customerGroup.primary_customer_id !== customerId)}
 
 
 value={discountCategory}
@@ -1656,6 +2074,9 @@ value={c}
 className="input"
 
 
+disabled={Boolean(customerGroup && customerGroup.primary_customer_id !== customerId)}
+
+
 type="number"
 
 
@@ -1690,6 +2111,9 @@ Number(e.target.value)
 
 
 className="btn btn-primary"
+
+
+disabled={Boolean(customerGroup && customerGroup.primary_customer_id !== customerId)}
 
 
 onClick={addDiscount}
@@ -1797,6 +2221,9 @@ discounts.map(item=>(
 className="btn btn-danger btn-small"
 
 
+disabled={Boolean(customerGroup && customerGroup.primary_customer_id !== customerId)}
+
+
 onClick={()=>deleteDiscount(item.id)}
 
 
@@ -1845,6 +2272,11 @@ onClick={()=>deleteDiscount(item.id)}
 
 
 </div>
+  </>
+)}
+
+{!isBranchCreate && (
+  <>
 {/* ==========================
         قراردادها و تصاویر
 ========================== */}
@@ -2226,6 +2658,10 @@ onClick={()=>deleteMedia(item.id)}
 
 
 
+
+
+  </>
+)}
 
 </AppShell>
 

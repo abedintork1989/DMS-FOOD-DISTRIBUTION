@@ -150,34 +150,41 @@ export default function OrderDetailPage() {
     return `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`;
   }
 
-  function formatPersianDate(value: string | null | undefined) {
-    if (!value) return "-";
+  function normalizeDeliveryDate(value: string | null | undefined) {
+    if (!value) return "";
 
     try {
       const clean = String(value).trim();
-
-      // تاریخ در دیتابیس شمسی ذخیره شده است:
-      // مثال: 1405/05/23 12:30:00
-      // فقط همان فرمت ذخیره شده را برای نمایش برمی‌گردانیم.
-      // تبدیل به Date یا locale فارسی باعث نمایش عددی اشتباه مثل ۱٬۴۰۵ می‌شود.
-
       const datePart = clean.split(" ")[0];
-      const parts = datePart.split("/");
 
-      if (parts.length === 3) {
-        const [year, month, day] = parts;
-
-        const y = String(year).trim();
-        const m = String(month).padStart(2, "0");
-        const d = String(day).padStart(2, "0");
-
-        return `${y}/${m}/${d}`;
+      // اگر مقدار از قبل شمسی باشد (مثلاً 1405/05/23)، همان را نگه می‌داریم.
+      const slashParts = datePart.split("/");
+      if (
+        slashParts.length === 3 &&
+        Number(slashParts[0]) >= 1300 &&
+        Number(slashParts[0]) <= 1500
+      ) {
+        return `${slashParts[0]}/${String(slashParts[1]).padStart(2, "0")}/${String(slashParts[2]).padStart(2, "0")}`;
       }
 
-      return clean;
+      // اگر مقدار میلادی باشد (مثلاً 2026-08-14)، آن را به شمسی تبدیل می‌کنیم.
+      const date = new Date(`${datePart}T12:00:00`);
+      if (Number.isNaN(date.getTime())) return "";
+
+      const jalali = new DateObject({
+        date,
+        calendar: persian,
+        locale: persian_fa,
+      });
+
+      return `${jalali.year}/${String(jalali.month.number).padStart(2, "0")}/${String(jalali.day).padStart(2, "0")}`;
     } catch {
-      return "-";
+      return "";
     }
+  }
+
+  function formatPersianDate(value: string | null | undefined) {
+    return normalizeDeliveryDate(value) || "-";
   }
 
   // تاریخ تحویل فقط تاریخ نیست؛ برای حفظ زمان ثبت، timestamp کامل نگه می‌داریم.
@@ -270,7 +277,7 @@ export default function OrderDetailPage() {
       // مقدار تاریخ ذخیره شده را برای نمایش مجدد در DatePicker برمی‌گردانیم.
       // اگر سفارش هنوز تاریخ تحویلی ندارد، پیش‌فرض روی تاریخ امروز قرار می‌گیرد
       // (فقط برای نمایش؛ تا زمانی که «ذخیره تغییرات» زده نشود چیزی در دیتابیس ثبت نمی‌شود).
-      setDeliveryDate(orderData.delivery_date || getTodayJalaliString());
+      setDeliveryDate(normalizeDeliveryDate(orderData.delivery_date) || getTodayJalaliString());
 
       const originalWarehouseSendDate =
         orderData.warehouse_send_date || orderData.send_date || null;
@@ -580,7 +587,7 @@ export default function OrderDetailPage() {
     setSelectedProductIds({});
     setPendingCartons({});
     // در صورت لغو ویرایش، تاریخ نمایشی به آخرین مقدار ذخیره‌شده (یا امروز) برمی‌گردد.
-    setDeliveryDate(order.delivery_date || getTodayJalaliString());
+    setDeliveryDate(normalizeDeliveryDate(order.delivery_date) || getTodayJalaliString());
 
     const originalWarehouseSendDate =
       order.warehouse_send_date || order.send_date || "";
@@ -1403,7 +1410,7 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
         warehouse_send_date: savedOrder.warehouse_send_date,
       }));
 
-      setDeliveryDate(savedOrder.delivery_date || getTodayJalaliString());
+      setDeliveryDate(normalizeDeliveryDate(savedOrder.delivery_date) || getTodayJalaliString());
 
       if (savedOrder.warehouse_send_date) {
         const savedWarehouseSendDate = String(
@@ -1520,23 +1527,24 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           <div>
             <strong>تاریخ ارسال سفارش:</strong><br />
             {isEditing ? (
-              <DatePicker
-                calendar={persian}
-                locale={persian_fa}
-                format="YYYY/MM/DD"
-                value={warehouseSendDate || ""}
-                onChange={(date: any) => {
-                  if (date) {
-                    setWarehouseSendDate(
-                      `${date.year}/${String(date.month.number).padStart(2, "0")}/${String(date.day).padStart(2, "0")}`
-                    );
-                  }
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  color: "#475569",
+                  fontWeight: 700,
+                  cursor: "not-allowed",
+                  opacity: 0.9,
                 }}
-                calendarPosition="bottom-right"
-                inputClass="input"
-                editable={false}
-                placeholder="انتخاب تاریخ ارسال"
-              />
+                title="تاریخ ارسال پس از ورود به انبار قابل تغییر نیست."
+              >
+                🔒 {formatWarehouseSendDate(
+                  order.warehouse_send_date || order.send_date || null
+                )}
+              </div>
             ) : (
               formatWarehouseSendDate(
                 order.warehouse_send_date ||
@@ -1547,13 +1555,23 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           </div>
 
           {isEditing && (
-            <div>
-              <strong>تاریخ تحویل:</strong><br />
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                background: "#ecfdf5",
+                border: "2px solid #22c55e",
+                boxShadow: "0 4px 12px rgba(34, 197, 94, 0.12)",
+              }}
+            >
+              <strong style={{ color: "#166534", display: "block", marginBottom: 6 }}>
+                تاریخ تحویل
+              </strong>
               <DatePicker
                 calendar={persian}
                 locale={persian_fa}
                 format="YYYY/MM/DD"
-                value={deliveryDate}
+                value={deliveryDate || ""}
                 onChange={(date: any) => {
                   const formatted = formatDeliveryDate(date);
                   setDeliveryDate(formatted || "");
@@ -1567,10 +1585,17 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           )}
 
           {!isEditing && (
-            <div>
-              <strong>تاریخ تحویل:</strong><br />
-              {/* اگر تاریخ تحویل هنوز ثبت نشده، تا زمان ویرایش و ثبت واقعی
-                  تاریخ امروز به‌صورت پیش‌فرض نمایش داده می‌شود. */}
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                background: "#ecfdf5",
+                border: "2px solid #22c55e",
+              }}
+            >
+              <strong style={{ color: "#166534", display: "block", marginBottom: 6 }}>
+                تاریخ تحویل
+              </strong>
               {formatPersianDate(order.delivery_date || getTodayJalaliString())}
             </div>
           )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactElement, useEffect, useMemo, useState } from "react";
+import { FormEvent, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Save,
@@ -8,6 +8,7 @@ import {
   Paperclip,
   Link2,
   ChevronDown,
+  Filter,
   Zap,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -23,6 +24,7 @@ type Customer = {
   name: string;
   province?: string | null;
   settlement_days?: number | null;
+  customer_group_id?: string | null;
 };
 
 type PaymentAllocation = {
@@ -36,12 +38,13 @@ type PaymentAllocation = {
 type MarketingRaw = {
   id: string;
   totalAmount: number;
-  description: string | null;
 };
 
 type OrderRaw = {
   id: string;
   order_number: string | number;
+  customer_id?: string | null;
+  branch_name?: string | null;
   invoice_total: number;
   delivery_date: string | null;
   settlement_due_date: string | null;
@@ -49,6 +52,7 @@ type OrderRaw = {
 
 type PaymentRecord = {
   id: string;
+  customer_id?: string | null;
   payment_number?: number | null;
   attachment_urls?: string[];
   amount: number;
@@ -81,7 +85,29 @@ type LedgerRow = {
   orderId?: string;
   invoiceTotal?: number;
   marketingId?: string;
+  sourceCustomerId?: string | null;
 };
+
+type FilterSelection = string[] | null;
+type LedgerFilterKey =
+  | "documentNumber"
+  | "documentType"
+  | "amount"
+  | "date"
+  | "settlementDueDate"
+  | "checkStatus"
+  | "description";
+type SettlementFilterKey =
+  | "orderNumber"
+  | "branch"
+  | "deliveryDate"
+  | "settlementDueDate"
+  | "invoiceTotal"
+  | "paid"
+  | "remaining"
+  | "daysToSettlement"
+  | "progress"
+  | "status";
 
 const paymentLabels: Record<PaymentType, string> = {
   cash: "نقدی",
@@ -100,7 +126,7 @@ const CHECK_STATUS_META: Record<
     color: "#92400e",
   },
   due: {
-    label: "عدم وصول  ",
+    label: "سررسید",
     background: "#fee2e2",
     color: "#b91c1c",
   },
@@ -115,7 +141,7 @@ const CHECK_STATUS_META: Record<
     color: "#92400e",
   },
   returned: {
-    label: "عدم وصول  ",
+    label: "سررسید",
     background: "#fee2e2",
     color: "#b91c1c",
   },
@@ -300,88 +326,6 @@ function gregorianStringToJalali(value: string) {
   return gregorianToJalali(gy, gm, gd);
 }
 
-/**
- * orders.delivery_date در پروژه شما یک تاریخ شمسی با فرمت YYYY/MM/DD است.
- * بنابراین نباید با new Date() یا gregorianToJalali روی آن کار شود.
- */
-function jalaliStringToParts(value: string | null) {
-  if (!value) return null;
-
-  const normalized = String(value)
-    .trim()
-    .split(" ")[0]
-    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
-
-  const parts = normalized.includes("/")
-    ? normalized.split("/")
-    : normalized.split("-");
-
-  if (parts.length !== 3) return null;
-
-  const [jy, jm, jd] = parts.map(Number);
-
-  if (!jy || !jm || !jd) return null;
-  if (jm < 1 || jm > 12) return null;
-  if (jd < 1 || jd > jalaliDaysInMonth(jy, jm)) return null;
-
-  return { jy, jm, jd };
-}
-
-function formatStoredJalaliDate(value: string | null) {
-  const parsed = jalaliStringToParts(value);
-  if (!parsed) return value ? toPersianDigits(String(value).trim()) : "-";
-
-  return `${toPersianDigits(parsed.jy)}/${toPersianDigits(
-    String(parsed.jm).padStart(2, "0")
-  )}/${toPersianDigits(String(parsed.jd).padStart(2, "0"))}`;
-}
-
-/**
- * محاسبه موعد تسویه فقط در تقویم شمسی.
- * نمونه: 1405/05/22 + 60 روز = 1405/07/21
- */
-function addDaysToJalaliString(value: string | null, daysToAdd: number) {
-  const parsed = jalaliStringToParts(value);
-  if (!parsed) return null;
-
-  let jy = parsed.jy;
-  let jm = parsed.jm;
-  let jd = parsed.jd;
-
-  const settlementDays = Math.max(
-    0,
-    Math.trunc(Number(daysToAdd) || 0)
-  );
-
-  // قرارداد این برنامه برای موعد تسویه:
-  // برای نمونه‌ی مشخص‌شده، 1405/05/22 با تسویه 60 روزه باید 1405/07/21 باشد.
-  // بنابراین موعد را روی روزِ پس از تکمیل تعداد روزهای تسویه قرار می‌دهیم.
-  let steps = settlementDays > 0 ? settlementDays + 1 : 0;
-
-  while (steps > 0) {
-    jd += 1;
-
-    if (jd > jalaliDaysInMonth(jy, jm)) {
-      jd = 1;
-
-      if (jm === 12) {
-        jy += 1;
-        jm = 1;
-      } else {
-        jm += 1;
-      }
-    }
-
-    steps -= 1;
-  }
-
-  return `${jy}-${String(jm).padStart(2, "0")}-${String(jd).padStart(
-    2,
-    "0"
-  )}`;
-}
-
 function jalaliPartsToGregorianString(
   jy: number,
   jm: number,
@@ -396,10 +340,6 @@ function jalaliPartsToGregorianString(
 }
 
 function faDate(value: string | null) {
-  return formatStoredJalaliDate(value);
-}
-
-function faGregorianDate(value: string | null) {
   if (!value) return "-";
 
   const { jy, jm, jd } = gregorianStringToJalali(value);
@@ -407,6 +347,25 @@ function faGregorianDate(value: string | null) {
   return `${toPersianDigits(jy)}/${toPersianDigits(
     String(jm).padStart(2, "0")
   )}/${toPersianDigits(String(jd).padStart(2, "0"))}`;
+}
+
+function daysUntilSettlement(value: string | null) {
+  if (!value) return null;
+
+  const raw = String(value).substring(0, 10);
+  const [year, month, day] = raw.split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  const today = new Date();
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+  const dueDate = new Date(year, month - 1, day);
+
+  return Math.round((dueDate.getTime() - todayStart.getTime()) / 86400000);
 }
 
 function dateValueToJalali(value: string | null) {
@@ -537,6 +496,8 @@ export default function CustomerFinancePage() {
   const customerId = String(params?.id ?? "");
 
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [groupName, setGroupName] = useState<string | null>(null);
+  const [branchCount, setBranchCount] = useState(0);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [orders, setOrders] = useState<OrderRaw[]>([]);
   const [marketingItems, setMarketingItems] = useState<MarketingRaw[]>([]);
@@ -576,13 +537,40 @@ export default function CustomerFinancePage() {
   const [paymentFiles, setPaymentFiles] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<string[]>([]);
 
-  const [filters, setFilters] = useState({
-    documentType: "",
-    paymentType: "",
-    amount: "",
-    date: "",
-    checkStatus: "",
+  const [ledgerFilters, setLedgerFilters] = useState<Record<LedgerFilterKey, FilterSelection>>({
+    documentNumber: null,
+    documentType: null,
+    amount: null,
+    date: null,
+    settlementDueDate: null,
+    checkStatus: null,
+    description: null,
   });
+
+  const [settlementFilters, setSettlementFilters] = useState<Record<SettlementFilterKey, FilterSelection>>({
+    orderNumber: null,
+    branch: null,
+    deliveryDate: null,
+    settlementDueDate: null,
+    invoiceTotal: null,
+    paid: null,
+    remaining: null,
+    daysToSettlement: null,
+    progress: null,
+    status: null,
+  });
+
+  const [openLedgerFilter, setOpenLedgerFilter] = useState<LedgerFilterKey | null>(null);
+  const [openSettlementFilter, setOpenSettlementFilter] = useState<SettlementFilterKey | null>(null);
+
+  // ---- column widths (Excel-like manual resizing) ----
+  const [settlementColumnWidths, setSettlementColumnWidths] = useState<number[]>([
+    120, 145, 130, 140, 150, 150, 145, 135, 150, 130,
+  ]);
+
+  const [ledgerColumnWidths, setLedgerColumnWidths] = useState<number[]>([
+    120, 120, 145, 155, 155, 130, 175, 240,
+  ]);
 
   // ---- allocation state ----
   const [expandedSource, setExpandedSource] = useState<{
@@ -594,18 +582,60 @@ export default function CustomerFinancePage() {
   >({});
   const [savingAllocations, setSavingAllocations] = useState(false);
 
-  function setFilter(key: keyof typeof filters, value: string) {
-    setFilters((previous) => ({ ...previous, [key]: value }));
+  function setLedgerColumnFilter(key: LedgerFilterKey, value: FilterSelection) {
+    setLedgerFilters((previous) => ({ ...previous, [key]: value }));
   }
 
-  function clearFilters() {
-    setFilters({
-      documentType: "",
-      paymentType: "",
-      amount: "",
-      date: "",
-      checkStatus: "",
+  function setSettlementColumnFilter(
+    key: SettlementFilterKey,
+    value: FilterSelection
+  ) {
+    setSettlementFilters((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function resizeSettlementColumn(index: number, delta: number) {
+    setSettlementColumnWidths((previous) => {
+      const next = [...previous];
+      next[index] = Math.max(75, next[index] + delta);
+      return next;
     });
+  }
+
+  function resizeLedgerColumn(index: number, delta: number) {
+    setLedgerColumnWidths((previous) => {
+      const next = [...previous];
+      next[index] = Math.max(75, next[index] + delta);
+      return next;
+    });
+  }
+
+  function clearLedgerFilters() {
+    setLedgerFilters({
+      documentNumber: null,
+      documentType: null,
+      amount: null,
+      date: null,
+      settlementDueDate: null,
+      checkStatus: null,
+      description: null,
+    });
+    setOpenLedgerFilter(null);
+  }
+
+  function clearSettlementFilters() {
+    setSettlementFilters({
+      orderNumber: null,
+      branch: null,
+      deliveryDate: null,
+      settlementDueDate: null,
+      invoiceTotal: null,
+      paid: null,
+      remaining: null,
+      daysToSettlement: null,
+      progress: null,
+      status: null,
+    });
+    setOpenSettlementFilter(null);
   }
 
   useEffect(() => {
@@ -621,71 +651,228 @@ export default function CustomerFinancePage() {
     setLoading(true);
 
     try {
-      const customerResult = await supabase
-        .from("customers")
-        .select("id,name,province,settlement_days")
-        .eq("id", customerId)
-        .single();
+      // ----------------------------------------------------------
+      // 1) مشتری فعلی + ساختار مجموعه
+      // ----------------------------------------------------------
+      const { data: baseCustomer, error: baseCustomerError } =
+        await supabase
+          .from("customers")
+          .select("id,name,province,settlement_days,customer_group_id")
+          .eq("id", customerId)
+          .single();
 
-      if (customerResult.error) throw customerResult.error;
+      if (baseCustomerError) {
+        throw baseCustomerError;
+      }
 
-      setCustomer(customerResult.data as Customer);
+      let parentCustomerId = customerId;
+      let currentGroupId: string | null =
+        baseCustomer?.customer_group_id || null;
+      let currentGroupName: string | null = null;
 
-      const [
-        ordersResult,
-        paymentsResult,
-        marketingResult,
-        allocationsResult,
-      ] = await Promise.all([
-        supabase
+      if (currentGroupId) {
+        const { data: groupRow, error: groupError } =
+          await supabase
+            .from("customer_groups")
+            .select("id,name,primary_customer_id")
+            .eq("id", currentGroupId)
+            .single();
+
+        if (groupError) {
+          throw groupError;
+        }
+
+        currentGroupName = groupRow?.name || null;
+        parentCustomerId =
+          groupRow?.primary_customer_id || customerId;
+      } else {
+        // اگر خود مشتری مادر باشد، گروه را از primary_customer_id پیدا کن.
+        const { data: ownedGroup, error: ownedGroupError } =
+          await supabase
+            .from("customer_groups")
+            .select("id,name,primary_customer_id")
+            .eq("primary_customer_id", customerId)
+            .maybeSingle();
+
+        if (ownedGroupError) {
+          throw ownedGroupError;
+        }
+
+        if (ownedGroup) {
+          currentGroupId = ownedGroup.id;
+          currentGroupName = ownedGroup.name;
+          parentCustomerId = ownedGroup.primary_customer_id;
+        }
+      }
+
+      // ----------------------------------------------------------
+      // 2) همه شعب این مجموعه
+      // ----------------------------------------------------------
+      let scopedCustomerIds = [parentCustomerId];
+      let groupCustomers: any[] = [];
+
+      if (currentGroupId) {
+        const {
+          data: loadedGroupCustomers,
+          error: groupCustomersError,
+        } = await supabase
+          .from("customers")
+          .select("id,name,customer_group_id")
+          .eq("customer_group_id", currentGroupId);
+
+        if (groupCustomersError) {
+          throw groupCustomersError;
+        }
+
+        groupCustomers = loadedGroupCustomers || [];
+
+        scopedCustomerIds = groupCustomers
+          .filter(
+            (row: any) => row.id !== parentCustomerId
+          )
+          .map((row: any) => row.id);
+
+        const count = scopedCustomerIds.length;
+
+        setBranchCount(count);
+
+        // اگر مشتری فعلی یک شعبه بود، عنوان صفحه همچنان نام مادر است.
+        if (currentGroupName) {
+          setGroupName(currentGroupName);
+        }
+      } else {
+        setBranchCount(0);
+        setGroupName(baseCustomer?.name || null);
+      }
+
+      // ----------------------------------------------------------
+      // 3) دریافت همه سفارش‌های تمام شعب
+      // ----------------------------------------------------------
+      const { data: ordersData, error: ordersError } =
+        await supabase
           .from("orders")
-          .select("id,order_number,invoice_total,delivery_date,settlement_due_date")
-          .eq("customer_id", customerId)
+          .select(
+            "id,order_number,customer_id,invoice_total,delivery_date,settlement_due_date"
+          )
+          .in("customer_id", scopedCustomerIds)
           .eq("status", "delivered")
-          .order("delivery_date", { ascending: false }),
+          .order("delivery_date", { ascending: false });
 
-        supabase
+      if (ordersError) {
+        throw ordersError;
+      }
+
+      // ----------------------------------------------------------
+      // 4) همه پرداختی‌ها
+      //
+      // در مجموعه‌ها «پرداخت» می‌تواند روی مشتری مادر ثبت شود،
+      // در حالی که سفارش‌ها فقط روی شعبه‌ها ثبت می‌شوند.
+      // بنابراین برای پرداختی‌ها، علاوه بر شعب، مشتری مادر را هم
+      // در محدوده جستجو نگه می‌داریم تا سند پرداخت بعد از ثبت
+      // در صفحه همان مجموعه بلافاصله نمایش داده شود.
+      // ----------------------------------------------------------
+      const paymentScopedCustomerIds = currentGroupId
+        ? Array.from(new Set([...scopedCustomerIds, parentCustomerId]))
+        : scopedCustomerIds;
+
+      const { data: paymentsData, error: paymentsError } =
+        await supabase
           .from("payments")
-          .select(
-            "id,payment_number,attachment_urls,amount,payment_date,payment_type,description,bank_name,destination_account,tracking_code,terminal_number,pos_tracking_code,check_number,sayadi_number,check_issue_date,check_due_date,check_status"
-          )
-          .eq("customer_id", customerId)
-          .order("payment_date", { ascending: false }),
+          .select(`
+            id,
+            customer_id,
+            payment_number,
+            amount,
+            payment_date,
+            payment_type,
+            description,
+            bank_name,
+            destination_account,
+            tracking_code,
+            terminal_number,
+            pos_tracking_code,
+            check_number,
+            sayadi_number,
+            check_issue_date,
+            check_due_date,
+            check_status,
+            attachment_urls
+          `)
+          .in("customer_id", paymentScopedCustomerIds)
+          .order("payment_date", { ascending: false });
 
-        supabase
+      if (paymentsError) {
+        throw paymentsError;
+      }
+
+      // ----------------------------------------------------------
+      // 5) همه مارکتینگ‌های تمام شعب
+      // ----------------------------------------------------------
+      const { data: marketingData, error: marketingError } =
+        await supabase
           .from("customer_marketing")
-          .select(
-            "id,start_date,end_date,shelf_rent,tray_rent,board_rent,promoter_cost,side_cost,foc_amount,description"
-          )
-          .eq("customer_id", customerId)
-          .order("start_date", { ascending: false }),
+          .select(`
+            id,
+            customer_id,
+            shelf_rent,
+            tray_rent,
+            board_rent,
+            promoter_cost,
+            side_cost,
+            foc_amount,
+            start_date,
+            end_date
+          `)
+          .in("customer_id", scopedCustomerIds)
+          .order("end_date", { ascending: false });
 
-        supabase
+      if (marketingError) {
+        throw marketingError;
+      }
+
+      // ----------------------------------------------------------
+      // 6) تخصیص پرداخت‌ها / مارکتینگ‌ها به سفارش‌ها
+      // ----------------------------------------------------------
+      const { data: allocationData, error: allocationError } =
+        await supabase
           .from("payment_allocations")
           .select("id,payment_id,marketing_id,order_id,amount")
-          .eq("customer_id", customerId),
-      ]);
+          .in("customer_id", paymentScopedCustomerIds);
 
-      if (ordersResult.error) throw ordersResult.error;
-      if (paymentsResult.error) throw paymentsResult.error;
-      if (marketingResult.error) throw marketingResult.error;
-      if (allocationsResult.error) throw allocationsResult.error;
+      if (allocationError) {
+        throw allocationError;
+      }
 
-      // ذخیره سفارش‌های خام برای جدول تسویه و پنل عطف
-      const rawOrders: OrderRaw[] = (ordersResult.data || []).map(
-        (o: any) => ({
-          id: o.id,
-          order_number: o.order_number ?? o.id,
-          invoice_total: Number(o.invoice_total || 0),
-          delivery_date: o.delivery_date || null,
-          settlement_due_date: o.settlement_due_date || null,
+      setAllocations(allocationData || []);
+
+      setCustomer({
+        ...baseCustomer,
+        id: parentCustomerId,
+        name:
+          currentGroupName ||
+          (parentCustomerId === customerId
+            ? baseCustomer?.name
+            : baseCustomer?.name),
+      });
+
+      const customerNameMap = new Map(
+        (groupCustomers || []).map((customer: any) => [
+          customer.id,
+          customer.name,
+        ])
+      );
+
+      const ordersWithBranchName = (ordersData || []).map(
+        (order: any) => ({
+          ...order,
+          branch_name:
+            customerNameMap.get(order.customer_id) || "-",
         })
       );
-      setOrders(rawOrders);
 
-      // ذخیره مارکتینگ‌های خام برای پنل عطف
-      const rawMarketing: MarketingRaw[] = (marketingResult.data || []).map(
-        (item: any) => ({
+      setOrders(ordersWithBranchName);
+      setMarketingItems(
+        (marketingData || []).map((item: any) => ({
           id: item.id,
           totalAmount:
             Number(item.shelf_rent || 0) +
@@ -694,42 +881,29 @@ export default function CustomerFinancePage() {
             Number(item.promoter_cost || 0) +
             Number(item.side_cost || 0) +
             Number(item.foc_amount || 0),
-          description: item.description || null,
-        })
+        }))
       );
-      setMarketingItems(rawMarketing);
 
-      // ذخیره عطف‌ها
-      const rawAllocations: PaymentAllocation[] = (
-        allocationsResult.data || []
-      ).map((a: any) => ({
-        id: a.id,
-        payment_id: a.payment_id || null,
-        marketing_id: a.marketing_id || null,
-        order_id: a.order_id,
-        amount: Number(a.amount || 0),
-      }));
-      setAllocations(rawAllocations);
-
-      const orderRows: LedgerRow[] = (ordersResult.data || []).map(
+      const orderRows: LedgerRow[] = (ordersData || []).map(
         (order: any) => ({
           id: `order-${order.id}`,
           orderId: order.id,
           documentType: "سفارش",
-          documentNumber: String(order.order_number || order.id),
+          documentNumber: String(
+            order.order_number || order.id
+          ),
           description: null,
           amount: Number(order.invoice_total || 0),
           invoiceTotal: Number(order.invoice_total || 0),
           date: order.delivery_date || null,
           deliveryDate: order.delivery_date || null,
-          settlementDueDate: addDaysToJalaliString(
-            order.delivery_date || null,
-            Number(customerResult.data?.settlement_days || 0)
-          ),
+          settlementDueDate:
+            order.settlement_due_date || null,
+          sourceCustomerId: order.customer_id || null,
         })
       );
 
-      const marketingRows: LedgerRow[] = (marketingResult.data || []).map(
+      const marketingRows: LedgerRow[] = (marketingData || []).map(
         (item: any) => {
           const totalAmount =
             Number(item.shelf_rent || 0) +
@@ -744,28 +918,29 @@ export default function CustomerFinancePage() {
             marketingId: item.id,
             documentType: "مارکتینگ",
             documentNumber: "-",
-            description: item.description || null,
+            description: "هزینه‌های حمایتی مارکتینگ",
             amount: -totalAmount,
             date: item.end_date || item.start_date || null,
-          deliveryDate: null,
-          settlementDueDate: null,
+            sourceCustomerId: item.customer_id || null,
           };
         }
       );
 
-      const paymentRows: LedgerRow[] = (paymentsResult.data || []).map(
+      const paymentRows: LedgerRow[] = (paymentsData || []).map(
         (payment: any) => ({
           id: `payment-${payment.id}`,
           documentType: "سند پرداختی",
-          documentNumber: String(payment.payment_number || ""),
+          documentNumber: String(
+            payment.payment_number || ""
+          ),
           description: payment.description || null,
           amount: -Number(payment.amount || 0),
           date: payment.payment_date || null,
-          deliveryDate: null,
-          settlementDueDate: null,
           paymentType: payment.payment_type as PaymentType,
+          sourceCustomerId: payment.customer_id || null,
           payment: {
             id: payment.id,
+            customer_id: payment.customer_id || null,
             payment_number: payment.payment_number || null,
             attachment_urls: payment.attachment_urls || [],
             amount: Number(payment.amount || 0),
@@ -773,31 +948,50 @@ export default function CustomerFinancePage() {
             payment_type: payment.payment_type as PaymentType,
             description: payment.description || null,
             bank_name: payment.bank_name || null,
-            destination_account: payment.destination_account || null,
-            tracking_code: payment.tracking_code || null,
-            terminal_number: payment.terminal_number || null,
-            pos_tracking_code: payment.pos_tracking_code || null,
-            check_number: payment.check_number || null,
-            sayadi_number: payment.sayadi_number || null,
-            check_issue_date: payment.check_issue_date || null,
-            check_due_date: payment.check_due_date || null,
-            check_status: payment.check_status || "not_due",
+            destination_account:
+              payment.destination_account || null,
+            tracking_code:
+              payment.tracking_code || null,
+            terminal_number:
+              payment.terminal_number || null,
+            pos_tracking_code:
+              payment.pos_tracking_code || null,
+            check_number:
+              payment.check_number || null,
+            sayadi_number:
+              payment.sayadi_number || null,
+            check_issue_date:
+              payment.check_issue_date || null,
+            check_due_date:
+              payment.check_due_date || null,
+            check_status:
+              payment.check_status || "not_due",
           },
         })
       );
 
       setLedger(
         [...orderRows, ...paymentRows, ...marketingRows].sort((a, b) => {
+          const rank = (row: LedgerRow) =>
+            row.documentType === "سند پرداختی"
+              ? 0
+              : row.documentType === "سفارش"
+              ? 1
+              : 2;
+
+          const rankDiff = rank(a) - rank(b);
+          if (rankDiff !== 0) return rankDiff;
+
           const aTime = a.date ? new Date(a.date).getTime() : 0;
           const bTime = b.date ? new Date(b.date).getTime() : 0;
           return bTime - aTime;
         })
       );
     } catch (error: any) {
-      console.error("FINANCE LOAD ERROR:", error);
+      console.error("FINANCE GROUP LOAD ERROR:", error);
       setCustomer(null);
       alert(
-        `خطا در دریافت وضعیت مالی مشتری: ${
+        `خطا در دریافت وضعیت مالی مجموعه: ${
           error?.message || "خطای نامشخص"
         }`
       );
@@ -846,6 +1040,7 @@ export default function CustomerFinancePage() {
         ...order,
         paid,
         remaining: Math.max(0, remaining),
+        daysToSettlement: daysUntilSettlement(order.settlement_due_date),
         status,
         progress:
           order.invoice_total > 0
@@ -854,6 +1049,76 @@ export default function CustomerFinancePage() {
       };
     });
   }, [orders, orderAllocationMap]);
+
+  const settlementFilterValues = useMemo(() => {
+    const unique = (values: string[]) =>
+      Array.from(new Set(values)).sort((a, b) =>
+        a.localeCompare(b, "fa", { numeric: true })
+      );
+
+    return {
+      orderNumber: unique(orderSettlements.map((row) => toPersianDigits(String(row.order_number ?? "-")))),
+      branch: unique(orderSettlements.map((row) => row.branch_name || "-")),
+      deliveryDate: unique(orderSettlements.map((row) => faDate(row.delivery_date))),
+      settlementDueDate: unique(
+        orderSettlements.map((row) => faDate(row.settlement_due_date))
+      ),
+      invoiceTotal: unique(orderSettlements.map((row) => money(row.invoice_total))),
+      paid: unique(orderSettlements.map((row) => money(row.paid))),
+      remaining: unique(orderSettlements.map((row) => money(row.remaining))),
+      daysToSettlement: unique(
+        orderSettlements.map((row) =>
+          row.daysToSettlement === null
+            ? "-"
+            : toPersianDigits(row.daysToSettlement)
+        )
+      ),
+      progress: unique(
+        orderSettlements.map((row) =>
+          `${toPersianDigits(Math.round(row.progress))}٪`
+        )
+      ),
+      status: unique(
+        orderSettlements.map((row) => SETTLEMENT_META[row.status]?.label || row.status)
+      ),
+    };
+  }, [orderSettlements]);
+
+  function matchesSelected(value: string, selection: FilterSelection) {
+    return selection === null || selection.includes(value);
+  }
+
+  const filteredOrderSettlements = useMemo(() => {
+    return orderSettlements.filter((row) =>
+      matchesSelected(
+        toPersianDigits(String(row.order_number ?? "-")),
+        settlementFilters.orderNumber
+      ) &&
+      matchesSelected(row.branch_name || "-", settlementFilters.branch) &&
+      matchesSelected(faDate(row.delivery_date), settlementFilters.deliveryDate) &&
+      matchesSelected(
+        faDate(row.settlement_due_date),
+        settlementFilters.settlementDueDate
+      ) &&
+      matchesSelected(money(row.invoice_total), settlementFilters.invoiceTotal) &&
+      matchesSelected(money(row.paid), settlementFilters.paid) &&
+      matchesSelected(money(row.remaining), settlementFilters.remaining) &&
+      matchesSelected(
+        row.daysToSettlement === null
+          ? "-"
+          : toPersianDigits(row.daysToSettlement),
+        settlementFilters.daysToSettlement
+      ) &&
+      matchesSelected(
+        `${toPersianDigits(Math.round(row.progress))}٪`,
+        settlementFilters.progress
+      ) &&
+      matchesSelected(
+        SETTLEMENT_META[row.status]?.label || row.status,
+        settlementFilters.status
+      )
+    );
+  }, [orderSettlements, settlementFilters]);
 
   const totals = useMemo(() => {
     const invoices = ledger
@@ -873,23 +1138,11 @@ export default function CustomerFinancePage() {
       0
     );
 
-    // مجموع منابع قابل عطف:
-    // 1) سندهای پرداختی ثبت‌شده توسط کاربر
-    // 2) هزینه‌های مارکتینگ که به‌عنوان منبع قابل عطف ثبت شده‌اند
-    const totalAllocatableSources = ledger
-      .filter(
-        (row) =>
-          row.documentType === "سند پرداختی" ||
-          row.documentType === "مارکتینگ"
-      )
-      .reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+    const totalPayments = ledger
+      .filter((row) => row.documentType === "سند پرداختی")
+      .reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
-    // مبلغی که هنوز به هیچ فاکتوری عطف نشده است.
-    // totalAllocated شامل عطف‌های پرداختی و مارکتینگ است.
-    const unallocated = Math.max(
-      0,
-      totalAllocatableSources - totalAllocated
-    );
+    const unallocated = totalPayments - totalAllocated;
 
     const invoiceRemaining = orderSettlements.reduce(
       (sum, o) => sum + o.remaining,
@@ -906,56 +1159,80 @@ export default function CustomerFinancePage() {
     };
   }, [ledger, allocations, orderSettlements]);
 
+  const ledgerFilterValues = useMemo(() => {
+    const unique = (values: string[]) =>
+      Array.from(new Set(values)).sort((a, b) =>
+        a.localeCompare(b, "fa", { numeric: true })
+      );
+
+    return {
+      documentNumber: unique(ledger.map((row) => toPersianDigits(row.documentNumber || "-"))),
+      documentType: unique(
+        ledger.map((row) =>
+          row.paymentType
+            ? `${row.documentType} - ${paymentLabels[row.paymentType]}`
+            : row.documentType
+        )
+      ),
+      amount: unique(
+        ledger.map((row) =>
+          `${row.documentType === "سفارش" ? "- " : "+ "}${money(row.amount)}`
+        )
+      ),
+      date: unique(
+        ledger.map((row) =>
+          row.documentType === "سفارش" ? faDate(row.deliveryDate || null) : "—"
+        )
+      ),
+      settlementDueDate: unique(
+        ledger.map((row) =>
+          row.documentType === "سفارش" ? faDate(row.settlementDueDate || null) : "—"
+        )
+      ),
+      checkStatus: unique(
+        ledger.map((row) =>
+          row.paymentType === "check" && row.payment
+            ? getCheckStatusMeta(row.payment.check_status).label
+            : "—"
+        )
+      ),
+      description: unique(ledger.map((row) => row.description || "—")),
+    };
+  }, [ledger]);
+
   const filteredLedger = useMemo(() => {
-    const normalizeDigits = (value: string) =>
-      value
-        .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-        .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
-
-    const amountQuery = normalizeDigits(filters.amount).replace(
-      /[^0-9]/g,
-      ""
-    );
-
     return ledger.filter((row) => {
-      if (
-        filters.documentType &&
-        row.documentType !== filters.documentType
-      ) {
-        return false;
-      }
+      const documentTypeValue = row.paymentType
+        ? `${row.documentType} - ${paymentLabels[row.paymentType]}`
+        : row.documentType;
+      const amountValue =
+        `${row.documentType === "سفارش" ? "- " : "+ "}${money(row.amount)}`;
+      const dateValue =
+        row.documentType === "سفارش" ? faDate(row.deliveryDate || null) : "—";
+      const dueValue =
+        row.documentType === "سفارش"
+          ? faDate(row.settlementDueDate || null)
+          : "—";
+      const checkStatusValue =
+        row.paymentType === "check" && row.payment
+          ? getCheckStatusMeta(row.payment.check_status).label
+          : "—";
+      const descriptionValue = row.description || "—";
 
-      if (
-        filters.paymentType &&
-        (row.paymentType || "") !== filters.paymentType
-      ) {
-        return false;
-      }
-
-      if (filters.checkStatus) {
-        if (row.paymentType !== "check") return false;
-
-        if (
-          normalizedCheckStatus(row.payment?.check_status) !==
-          filters.checkStatus
-        ) {
-          return false;
-        }
-      }
-
-      if (amountQuery) {
-        const rowAmount = String(Math.abs(Number(row.amount || 0)));
-        if (!rowAmount.includes(amountQuery)) return false;
-      }
-
-      if (filters.date) {
-        const deliveryDate = row.documentType === "سفارش" ? row.deliveryDate : null;
-        if (!faDate(deliveryDate || null).includes(filters.date.trim())) return false;
-      }
-
-      return true;
+      return (
+        matchesSelected(
+          toPersianDigits(row.documentNumber || "-"),
+          ledgerFilters.documentNumber
+        ) &&
+        matchesSelected(documentTypeValue, ledgerFilters.documentType) &&
+        matchesSelected(amountValue, ledgerFilters.amount) &&
+        matchesSelected(dateValue, ledgerFilters.date) &&
+        matchesSelected(dueValue, ledgerFilters.settlementDueDate) &&
+        matchesSelected(checkStatusValue, ledgerFilters.checkStatus) &&
+        matchesSelected(descriptionValue, ledgerFilters.description)
+      );
     });
-  }, [ledger, filters]);
+  }, [ledger, ledgerFilters]);
 
   // اگر سند بازشده دیگر در لیست فیلترشده نبود، پنل عطف را ببند
   useEffect(() => {
@@ -987,15 +1264,22 @@ export default function CustomerFinancePage() {
     type: "payment" | "marketing";
     id: string;
     amount: number;
+    customerId: string;
   } | null {
     if (row.documentType === "سند پرداختی" && row.payment) {
-      return { type: "payment", id: row.payment.id, amount: row.payment.amount };
+      return {
+        type: "payment",
+        id: row.payment.id,
+        amount: row.payment.amount,
+        customerId: row.payment.customer_id || row.sourceCustomerId || customerId,
+      };
     }
     if (row.documentType === "مارکتینگ" && row.marketingId) {
       return {
         type: "marketing",
         id: row.marketingId,
         amount: Math.abs(row.amount),
+        customerId: row.sourceCustomerId || customerId,
       };
     }
     return null;
@@ -1058,21 +1342,9 @@ export default function CustomerFinancePage() {
 
     // مرتب‌سازی سفارش‌ها بر اساس تاریخ تحویل (قدیمی‌ترین اول)
     const sortedOrders = [...orders].sort((a, b) => {
-      const aDate = jalaliStringToParts(a.delivery_date);
-      const bDate = jalaliStringToParts(b.delivery_date);
-
-      const aKey = aDate
-        ? `${aDate.jy.toString().padStart(4, "0")}${aDate.jm
-            .toString()
-            .padStart(2, "0")}${aDate.jd.toString().padStart(2, "0")}`
-        : "99999999";
-      const bKey = bDate
-        ? `${bDate.jy.toString().padStart(4, "0")}${bDate.jm
-            .toString()
-            .padStart(2, "0")}${bDate.jd.toString().padStart(2, "0")}`
-        : "99999999";
-
-      if (aKey !== bKey) return aKey.localeCompare(bKey);
+      const aTime = a.delivery_date ? new Date(a.delivery_date).getTime() : 0;
+      const bTime = b.delivery_date ? new Date(b.delivery_date).getTime() : 0;
+      if (aTime !== bTime) return aTime - bTime;
       return String(a.order_number).localeCompare(String(b.order_number));
     });
 
@@ -1105,7 +1377,7 @@ export default function CustomerFinancePage() {
     const newAllocations: Array<{ order_id: string; amount: number }> = [];
     let totalAllocated = 0;
 
-    for (const [orderId, amountStr] of Object.entries(allocationDrafts)) {
+    for (const [orderId, amountStr] of Object.entries(allocationDrafts) as Array<[string, string]>) {
       const amt = Number(normalizeNumber(amountStr));
       if (amt > 0) {
         newAllocations.push({ order_id: orderId, amount: amt });
@@ -1150,11 +1422,15 @@ export default function CustomerFinancePage() {
     setSavingAllocations(true);
 
     try {
-      // حذف عطف‌های قبلی این سند مبدأ
+      // customer_id در payment_allocations باید دقیقاً با مالک سند مبدأ
+      // یکسان باشد. در مجموعه‌ها سند پرداخت معمولاً روی مشتری مادر ثبت شده
+      // ولی فاکتور روی شعبه قرار دارد؛ بنابراین customer_id را از خود سند مبدأ می‌گیریم.
+      const sourceCustomerId = source.customerId;
+
       let deleteQuery = supabase
         .from("payment_allocations")
         .delete()
-        .eq("customer_id", customerId);
+        .eq("customer_id", sourceCustomerId);
 
       if (source.type === "payment") {
         deleteQuery = deleteQuery.eq("payment_id", source.id);
@@ -1168,7 +1444,7 @@ export default function CustomerFinancePage() {
       // درج عطف‌های جدید
       if (newAllocations.length > 0) {
         const insertPayload = newAllocations.map((a) => ({
-          customer_id: customerId,
+          customer_id: sourceCustomerId,
           payment_id: source.type === "payment" ? source.id : null,
           marketing_id: source.type === "marketing" ? source.id : null,
           order_id: a.order_id,
@@ -1185,8 +1461,8 @@ export default function CustomerFinancePage() {
       // بارگذاری مجدد عطف‌ها
       const { data: allocData, error: allocError } = await supabase
         .from("payment_allocations")
-        .select("id,payment_id,marketing_id,order_id,amount")
-        .eq("customer_id", customerId);
+        .select("id,customer_id,payment_id,marketing_id,order_id,amount")
+        .eq("customer_id", sourceCustomerId);
 
       if (allocError) throw allocError;
 
@@ -1687,8 +1963,8 @@ export default function CustomerFinancePage() {
     return Math.max(0, Number(order.invoice_total || 0) - allocatedByOthers);
   }
 
-  function getDraftTotal() {
-    return Object.values(allocationDrafts).reduce(
+  function getDraftTotal(): number {
+    return (Object.values(allocationDrafts) as string[]).reduce(
       (sum, val) => sum + Number(normalizeNumber(val) || 0),
       0
     );
@@ -1740,6 +2016,15 @@ export default function CustomerFinancePage() {
             grid-template-columns: 1fr !important;
           }
         }
+
+        .finance-table th + th,
+        .finance-table td + td {
+          border-inline-start: 1px solid #e5e7eb;
+        }
+
+        .finance-table thead th + th {
+          border-inline-start-color: #dbe2ea;
+        }
       `}</style>
 
       {/* ---- sticky header + summary ---- */}
@@ -1758,10 +2043,29 @@ export default function CustomerFinancePage() {
           boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
         }}
       >
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 9,
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            color: "#1e3a8a",
+            fontSize: 13,
+          }}
+        >
+          تمام سفارش‌ها، پرداختی‌ها و هزینه‌های مارکتینگ شعب این مجموعه در همین
+          پرونده مالی تجمیع شده‌اند؛ برای مشتری مادر هیچ سفارش مستقیمی ثبت یا نمایش داده نمی‌شود.
+        </div>
+
         <div style={{ marginBottom: 14 }}>
           <PageHeader
-            title={`وضعیت مالی ${customer.name}`}
-            subtitle={customer.province || "استان ثبت نشده"}
+            title={`وضعیت مالی ${groupName || customer.name}`}
+            subtitle={
+              branchCount > 0
+                ? `حساب یکپارچه مجموعه — ${branchCount.toLocaleString("fa-IR")} شعبه`
+                : customer.province || "استان ثبت نشده"
+            }
             action={
               <button
                 type="button"
@@ -2008,7 +2312,7 @@ export default function CustomerFinancePage() {
                   }
                 >
                   <option value="not_due">عدم سررسید</option>
-                  <option value="due">عدم وصول</option>
+                  <option value="due">سررسید</option>
                   <option value="cleared">وصول شده</option>
                 </select>
               </div>
@@ -2166,42 +2470,184 @@ export default function CustomerFinancePage() {
         >
           <h3 style={{ margin: 0 }}>وضعیت تسویه فاکتورها</h3>
           <div style={{ color: "#64748b", fontSize: 12 }}>
-            {toPersianDigits(orderSettlements.length)} سفارش تحویل‌شده
+            {toPersianDigits(filteredOrderSettlements.length)} از {toPersianDigits(orderSettlements.length)} سفارش تحویل‌شده
           </div>
         </div>
 
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table
+            className="finance-table"
             style={{
-              width: "100%",
+              width: "max-content",
+              minWidth: "100%",
+              tableLayout: "fixed",
               borderCollapse: "separate",
               borderSpacing: 0,
             }}
           >
+            <colgroup>
+              {settlementColumnWidths.map((width, index) => (
+                <col key={index} style={{ width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ background: "#fbfdff" }}>
-                <Th>شماره سفارش</Th>
-                <Th>تاریخ تحویل</Th>
-                <Th>موعد تسویه</Th>
-                <Th>مبلغ فاکتور</Th>
-                <Th>پرداخت‌شده</Th>
-                <Th>مانده</Th>
-                <Th>پیشرفت تسویه</Th>
-                <Th>وضعیت</Th>
+                <ExcelFilterTh
+                  width={settlementColumnWidths[0]}
+                  onResize={(delta) => resizeSettlementColumn(0, delta)}
+                  label="شماره سفارش"
+                  values={settlementFilterValues.orderNumber}
+                  selected={settlementFilters.orderNumber}
+                  onChange={(value) => setSettlementColumnFilter("orderNumber", value)}
+                  open={openSettlementFilter === "orderNumber"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "orderNumber" ? null : "orderNumber"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[1]}
+                  onResize={(delta) => resizeSettlementColumn(1, delta)}
+                  label="شعبه"
+                  values={settlementFilterValues.branch}
+                  selected={settlementFilters.branch}
+                  onChange={(value) => setSettlementColumnFilter("branch", value)}
+                  open={openSettlementFilter === "branch"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(openSettlementFilter === "branch" ? null : "branch")
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[2]}
+                  onResize={(delta) => resizeSettlementColumn(2, delta)}
+                  label="تاریخ تحویل"
+                  values={settlementFilterValues.deliveryDate}
+                  selected={settlementFilters.deliveryDate}
+                  onChange={(value) => setSettlementColumnFilter("deliveryDate", value)}
+                  open={openSettlementFilter === "deliveryDate"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "deliveryDate" ? null : "deliveryDate"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[3]}
+                  onResize={(delta) => resizeSettlementColumn(3, delta)}
+                  label="موعد تسویه"
+                  values={settlementFilterValues.settlementDueDate}
+                  selected={settlementFilters.settlementDueDate}
+                  onChange={(value) =>
+                    setSettlementColumnFilter("settlementDueDate", value)
+                  }
+                  open={openSettlementFilter === "settlementDueDate"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "settlementDueDate"
+                        ? null
+                        : "settlementDueDate"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[4]}
+                  onResize={(delta) => resizeSettlementColumn(4, delta)}
+                  label="مبلغ فاکتور"
+                  values={settlementFilterValues.invoiceTotal}
+                  selected={settlementFilters.invoiceTotal}
+                  onChange={(value) => setSettlementColumnFilter("invoiceTotal", value)}
+                  open={openSettlementFilter === "invoiceTotal"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "invoiceTotal" ? null : "invoiceTotal"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[5]}
+                  onResize={(delta) => resizeSettlementColumn(5, delta)}
+                  label="پرداخت‌شده"
+                  values={settlementFilterValues.paid}
+                  selected={settlementFilters.paid}
+                  onChange={(value) => setSettlementColumnFilter("paid", value)}
+                  open={openSettlementFilter === "paid"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(openSettlementFilter === "paid" ? null : "paid")
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[6]}
+                  onResize={(delta) => resizeSettlementColumn(6, delta)}
+                  label="مانده"
+                  values={settlementFilterValues.remaining}
+                  selected={settlementFilters.remaining}
+                  onChange={(value) => setSettlementColumnFilter("remaining", value)}
+                  open={openSettlementFilter === "remaining"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "remaining" ? null : "remaining"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[7]}
+                  onResize={(delta) => resizeSettlementColumn(7, delta)}
+                  label="روز مانده به تسویه"
+                  values={settlementFilterValues.daysToSettlement}
+                  selected={settlementFilters.daysToSettlement}
+                  onChange={(value) =>
+                    setSettlementColumnFilter("daysToSettlement", value)
+                  }
+                  open={openSettlementFilter === "daysToSettlement"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "daysToSettlement"
+                        ? null
+                        : "daysToSettlement"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[8]}
+                  onResize={(delta) => resizeSettlementColumn(7, delta)}
+                  label="پیشرفت تسویه"
+                  values={settlementFilterValues.progress}
+                  selected={settlementFilters.progress}
+                  onChange={(value) => setSettlementColumnFilter("progress", value)}
+                  open={openSettlementFilter === "progress"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(
+                      openSettlementFilter === "progress" ? null : "progress"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={settlementColumnWidths[9]}
+                  onResize={(delta) => resizeSettlementColumn(9, delta)}
+                  label="وضعیت"
+                  values={settlementFilterValues.status}
+                  selected={settlementFilters.status}
+                  onChange={(value) => setSettlementColumnFilter("status", value)}
+                  open={openSettlementFilter === "status"}
+                  onToggle={() =>
+                    setOpenSettlementFilter(openSettlementFilter === "status" ? null : "status")
+                  }
+                />
               </tr>
             </thead>
             <tbody>
-              {orderSettlements.length === 0 ? (
+              {filteredOrderSettlements.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     style={{ textAlign: "center", padding: 30 }}
                   >
                     سفارش تحویل‌شده‌ای وجود ندارد.
                   </td>
                 </tr>
               ) : (
-                orderSettlements.map((order) => {
+                filteredOrderSettlements.map((order) => {
                   const meta = SETTLEMENT_META[order.status];
                   return (
                     <tr
@@ -2211,15 +2657,22 @@ export default function CustomerFinancePage() {
                       <td style={{ padding: "10px", fontWeight: 600 }}>
                         {toPersianDigits(order.order_number)}
                       </td>
-                      <td style={{ padding: "10px" }}>{faDate(order.delivery_date)}</td>
-                      <td style={{ padding: "10px" }}>
-                        {faDate(
-                          addDaysToJalaliString(
-                            order.delivery_date,
-                            Number(customer?.settlement_days || 0)
-                          )
-                        )}
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 700,
+                          color:
+                            order.customer_id === customer?.id
+                              ? "#1d4ed8"
+                              : "#334155",
+                        }}
+                      >
+                        {order.branch_name || "-"}
                       </td>
+                      <td style={{ padding: "10px" }}>
+                        {faDate(order.delivery_date)}
+                      </td>
+                      <td style={{ padding: "10px" }}>{faDate(order.settlement_due_date)}</td>
                       <td
                         style={{
                           padding: "10px",
@@ -2255,6 +2708,28 @@ export default function CustomerFinancePage() {
                         }}
                       >
                         {money(order.remaining)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px",
+                          fontWeight: 800,
+                          direction: "ltr",
+                          textAlign: "right",
+                          whiteSpace: "nowrap",
+                          color:
+                            order.daysToSettlement === null
+                              ? "#94a3b8"
+                              : order.daysToSettlement < 0
+                              ? "#dc2626"
+                              : order.daysToSettlement === 0
+                              ? "#d97706"
+                              : "#15803d",
+                        }}
+                      >
+                        {order.daysToSettlement === null
+                          ? "-"
+                          : toPersianDigits(order.daysToSettlement)}
+                        {order.daysToSettlement !== null ? " روز" : ""}
                       </td>
                       <td style={{ padding: "10px", minWidth: 120 }}>
                         <div
@@ -2347,111 +2822,126 @@ export default function CustomerFinancePage() {
 
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table
+            className="finance-table"
             style={{
-              width: "100%",
+              width: "max-content",
+              minWidth: "100%",
+              tableLayout: "fixed",
               borderCollapse: "separate",
               borderSpacing: 0,
             }}
           >
+            <colgroup>
+              {ledgerColumnWidths.map((width, index) => (
+                <col key={index} style={{ width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ background: "#fbfdff" }}>
-                <Th>شماره سند</Th>
-                <Th>نوع سند</Th>
-                <Th>مبلغ</Th>
-                <Th>تاریخ تحویل سفارش</Th>
-                <Th>موعد تسویه فاکتور</Th>
-                <Th>وضعیت</Th>
-                <Th>عملیات</Th>
-                <Th>توضیحات</Th>
-              </tr>
-
-              {/* ---- filter row (fixed alignment) ---- */}
-              <tr style={{ background: "#f8fafc" }}>
-                <th style={{ padding: 6 }} />
-                <th style={{ padding: 6 }}>
-                  <select
-                    className="select"
-                    value={filters.documentType}
-                    onChange={(event) =>
-                      setFilter("documentType", event.target.value)
-                    }
-                    style={{ width: "100%", fontSize: 12 }}
-                  >
-                    <option value="">همه</option>
-                    <option value="سفارش">سفارش</option>
-                    <option value="سند پرداختی">سند پرداختی</option>
-                    <option value="مارکتینگ">مارکتینگ</option>
-                  </select>
-                </th>
-                <th style={{ padding: 6 }}>
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    value={filters.amount}
-                    onChange={(event) =>
-                      setFilter("amount", event.target.value)
-                    }
-                    placeholder="مبلغ"
-                    style={{ width: "100%", fontSize: 12 }}
-                  />
-                </th>
-                <th style={{ padding: 6 }}>
-                  <input
-                    className="input"
-                    value={filters.date}
-                    onChange={(event) =>
-                      setFilter("date", event.target.value)
-                    }
-                    placeholder="۱۴۰۵/۰۵"
-                    style={{ width: "100%", fontSize: 12 }}
-                  />
-                </th>
-                <th style={{ padding: 6 }} />
-                <th style={{ padding: 6 }}>
-                  <select
-                    className="select"
-                    value={filters.checkStatus}
-                    onChange={(event) =>
-                      setFilter("checkStatus", event.target.value)
-                    }
-                    style={{ width: "100%", fontSize: 12 }}
-                  >
-                    <option value="">همه</option>
-                    <option value="not_due">عدم سررسید</option>
-                    <option value="due">عدم وصول </option>
-                    <option value="cleared">وصول</option>
-                  </select>
-                </th>
-                <th style={{ padding: 6 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select
-                      className="select"
-                      value={filters.paymentType}
-                      onChange={(event) =>
-                        setFilter("paymentType", event.target.value)
-                      }
-                      style={{ width: "100%", fontSize: 12 }}
-                    >
-                      <option value="">همه</option>
-                      <option value="cash">نقدی</option>
-                      <option value="bank_transfer">واریز</option>
-                      <option value="pos">پوز</option>
-                      <option value="check">چک</option>
-                    </select>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={clearFilters}
-                      title="پاک کردن فیلترها"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </th>
-                <th style={{ padding: 6 }} />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[0]}
+                  onResize={(delta) => resizeLedgerColumn(0, delta)}
+                  label="شماره سند"
+                  values={ledgerFilterValues.documentNumber}
+                  selected={ledgerFilters.documentNumber}
+                  onChange={(value) => setLedgerColumnFilter("documentNumber", value)}
+                  open={openLedgerFilter === "documentNumber"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(
+                      openLedgerFilter === "documentNumber" ? null : "documentNumber"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[1]}
+                  onResize={(delta) => resizeLedgerColumn(1, delta)}
+                  label="نوع سند"
+                  values={ledgerFilterValues.documentType}
+                  selected={ledgerFilters.documentType}
+                  onChange={(value) => setLedgerColumnFilter("documentType", value)}
+                  open={openLedgerFilter === "documentType"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(
+                      openLedgerFilter === "documentType" ? null : "documentType"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[2]}
+                  onResize={(delta) => resizeLedgerColumn(2, delta)}
+                  label="مبلغ"
+                  values={ledgerFilterValues.amount}
+                  selected={ledgerFilters.amount}
+                  onChange={(value) => setLedgerColumnFilter("amount", value)}
+                  open={openLedgerFilter === "amount"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(openLedgerFilter === "amount" ? null : "amount")
+                  }
+                />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[3]}
+                  onResize={(delta) => resizeLedgerColumn(3, delta)}
+                  label="تاریخ تحویل سفارش"
+                  values={ledgerFilterValues.date}
+                  selected={ledgerFilters.date}
+                  onChange={(value) => setLedgerColumnFilter("date", value)}
+                  open={openLedgerFilter === "date"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(openLedgerFilter === "date" ? null : "date")
+                  }
+                />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[4]}
+                  onResize={(delta) => resizeLedgerColumn(4, delta)}
+                  label="موعد تسویه فاکتور"
+                  values={ledgerFilterValues.settlementDueDate}
+                  selected={ledgerFilters.settlementDueDate}
+                  onChange={(value) => setLedgerColumnFilter("settlementDueDate", value)}
+                  open={openLedgerFilter === "settlementDueDate"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(
+                      openLedgerFilter === "settlementDueDate"
+                        ? null
+                        : "settlementDueDate"
+                    )
+                  }
+                />
+                <ExcelFilterTh
+                  width={ledgerColumnWidths[5]}
+                  onResize={(delta) => resizeLedgerColumn(5, delta)}
+                  label="وضعیت"
+                  values={ledgerFilterValues.checkStatus}
+                  selected={ledgerFilters.checkStatus}
+                  onChange={(value) => setLedgerColumnFilter("checkStatus", value)}
+                  open={openLedgerFilter === "checkStatus"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(
+                      openLedgerFilter === "checkStatus" ? null : "checkStatus"
+                    )
+                  }
+                />
+                <Th
+                  width={ledgerColumnWidths[6]}
+                  onResize={(delta) => resizeLedgerColumn(6, delta)}
+                >
+                  عملیات
+                </Th>
+                <ExcelFilterTh
+                  label="توضیحات"
+                  values={ledgerFilterValues.description}
+                  selected={ledgerFilters.description}
+                  onChange={(value) => setLedgerColumnFilter("description", value)}
+                  open={openLedgerFilter === "description"}
+                  onToggle={() =>
+                    setOpenLedgerFilter(
+                      openLedgerFilter === "description" ? null : "description"
+                    )
+                  }
+                  width={ledgerColumnWidths[7]}
+                  onResize={(delta) => resizeLedgerColumn(7, delta)}
+                />
               </tr>
             </thead>
-
             <tbody>
               {filteredLedger.length === 0 ? (
                 <tr>
@@ -2535,7 +3025,7 @@ export default function CustomerFinancePage() {
                             }}
                           >
                             <option value="not_due">عدم سررسید</option>
-                            <option value="due">عدم وصول </option>
+                            <option value="due">سررسید</option>
                             <option value="cleared">وصول</option>
                           </select>
                         ) : (
@@ -2547,16 +3037,20 @@ export default function CustomerFinancePage() {
                         {row.documentType === "سند پرداختی" ? (
                           <div
                             style={{
-                              display: "flex",
+                              display: "grid",
+                              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                              gap: 4,
+                              width: 154,
+                              maxWidth: "100%",
+                              margin: "0 auto",
                               alignItems: "center",
-                              gap: 6,
-                              flexWrap: "wrap",
                             }}
                           >
                             <button
                               type="button"
                               className="btn btn-secondary btn-small"
                               onClick={() => openEditPayment(row)}
+                              style={{ padding: "3px 4px", fontSize: 10, lineHeight: 1, whiteSpace: "nowrap", minWidth: 0, width: "100%", justifyContent: "center" }}
                               disabled={saving}
                             >
                               ویرایش
@@ -2567,21 +3061,9 @@ export default function CustomerFinancePage() {
                               type="button"
                               className="btn btn-secondary btn-small"
                               onClick={() => expandRow(row)}
+                              style={{ padding: "4px 6px", fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", color: "#2563eb", borderColor: expandedSource?.type === "payment" && expandedSource.id === row.payment?.id ? "#2563eb" : undefined, background: expandedSource?.type === "payment" && expandedSource.id === row.payment?.id ? "#eff6ff" : undefined }}
                               disabled={saving}
                               title="عطف پرداخت به فاکتورها"
-                              style={{
-                                color: "#2563eb",
-                                borderColor:
-                                  expandedSource?.type === "payment" &&
-                                  expandedSource.id === row.payment?.id
-                                    ? "#2563eb"
-                                    : undefined,
-                                background:
-                                  expandedSource?.type === "payment" &&
-                                  expandedSource.id === row.payment?.id
-                                    ? "#eff6ff"
-                                    : undefined,
-                              }}
                             >
                               <Link2 size={14} />
                               عطف
@@ -2619,27 +3101,31 @@ export default function CustomerFinancePage() {
                             </button>
 
                             {row.payment?.attachment_urls?.length ? (
-                              <a
-                                className="btn btn-secondary btn-small"
-                                href={row.payment.attachment_urls[0]}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <Paperclip size={14} />
-                                {toPersianDigits(
-                                  row.payment.attachment_urls.length
-                                )}{" "}
-                                فایل
-                              </a>
+                              <>
+                                {row.payment.attachment_urls.map((url, index) => (
+                                  <a
+                                    key={`${row.payment!.id}-attachment-${index}`}
+                                    className="btn btn-secondary btn-small"
+                                    href={url}
+                                    style={{ padding: "3px 4px", fontSize: 9, lineHeight: 1, whiteSpace: "nowrap", minWidth: 0, width: "100%", justifyContent: "center" }}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={`باز کردن فایل ${index + 1}`}
+                                  >
+                                    <Paperclip size={14} />
+                                    فایل {toPersianDigits(index + 1)}
+                                  </a>
+                                ))}
+                              </>
                             ) : null}
 
                             <button
                               type="button"
                               className="btn btn-secondary btn-small"
                               onClick={() => deletePayment(row)}
+                              style={{ padding: "3px 4px", fontSize: 10, lineHeight: 1, whiteSpace: "nowrap", color: "#b91c1c", minWidth: 0, width: "100%", justifyContent: "center" }}
                               disabled={saving}
                               title="حذف سند پرداختی"
-                              style={{ color: "#b91c1c" }}
                             >
                               <Trash2 size={14} />
                               حذف
@@ -2648,10 +3134,13 @@ export default function CustomerFinancePage() {
                         ) : row.documentType === "مارکتینگ" && row.marketingId ? (
                           <div
                             style={{
-                              display: "flex",
+                              display: "grid",
+                              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                              gap: 4,
+                              width: 154,
+                              maxWidth: "100%",
+                              margin: "0 auto",
                               alignItems: "center",
-                              gap: 6,
-                              flexWrap: "wrap",
                             }}
                           >
                             {/* دکمه عطف مارکتینگ به فاکتور */}
@@ -2852,6 +3341,7 @@ export default function CustomerFinancePage() {
                                 }}
                               >
                                 <table
+            className="finance-table"
                                   style={{
                                     width: "100%",
                                     borderCollapse: "separate",
@@ -3099,6 +3589,260 @@ export default function CustomerFinancePage() {
 
 // ---- helper components ----
 
+function ExcelFilterTh({
+  label,
+  values,
+  selected,
+  onChange,
+  open,
+  onToggle,
+  width = 150,
+  onResize,
+}: {
+  label: string;
+  values: string[];
+  selected: FilterSelection;
+  onChange: (value: FilterSelection) => void;
+  open: boolean;
+  onToggle: () => void;
+  width?: number;
+  onResize?: (delta: number) => void;
+}) {
+  return (
+    <th
+      style={{
+        position: "relative",
+        color: "#475569",
+        fontSize: 12,
+        fontWeight: 700,
+        padding: "8px 10px",
+        minWidth: width,
+        textAlign: "right",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+        }}
+      >
+        <span>{label}</span>
+        <button
+          type="button"
+          onClick={onToggle}
+          title={`فیلتر ${label}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 30,
+            height: 30,
+            borderRadius: 7,
+            border:
+              selected !== null && selected.length < values.length
+                ? "1px solid #2563eb"
+                : "1px solid #cbd5e1",
+            background:
+              selected !== null && selected.length < values.length
+                ? "#eff6ff"
+                : "#ffffff",
+            color:
+              selected !== null && selected.length < values.length
+                ? "#2563eb"
+                : "#475569",
+            cursor: "pointer",
+          }}
+        >
+          <Filter size={14} />
+        </button>
+      </div>
+
+      {open && (
+        <ExcelFilterDropdown
+          values={values}
+          selected={selected}
+          onChange={onChange}
+          onClose={onToggle}
+        />
+      )}
+
+      {onResize && <ColumnResizeHandle onResize={onResize} />}
+    </th>
+  );
+}
+
+function ExcelFilterDropdown({
+  values,
+  selected,
+  onChange,
+  onClose,
+}: {
+  values: string[];
+  selected: FilterSelection;
+  onChange: (value: FilterSelection) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  const visibleValues = useMemo(() => {
+    const q = search.trim().toLocaleLowerCase("fa");
+    if (!q) return values;
+    return values.filter((value) =>
+      value.toLocaleLowerCase("fa").includes(q)
+    );
+  }, [values, search]);
+
+  const allSelected = selected === null || values.every((value) => selected.includes(value));
+
+  function toggleValue(value: string) {
+    if (selected === null) {
+      const next = values.filter((item) => item !== value);
+      onChange(next.length === values.length ? null : next);
+      return;
+    }
+
+    const next = selected.includes(value)
+      ? selected.filter((item) => item !== value)
+      : [...selected, value];
+
+    onChange(next.length === values.length ? null : next);
+  }
+
+  function toggleVisibleValues() {
+    if (selected === null) {
+      onChange(values.filter((value) => !visibleValues.includes(value)));
+      return;
+    }
+
+    const visibleSet = new Set(visibleValues);
+    const everyVisibleSelected = visibleValues.every((value) => selected.includes(value));
+
+    if (everyVisibleSelected) {
+      const next = selected.filter((value) => !visibleSet.has(value));
+      onChange(next.length === values.length ? null : next);
+    } else {
+      const merged = Array.from(new Set([...selected, ...visibleValues]));
+      onChange(merged.length === values.length ? null : merged);
+    }
+  }
+
+  return (
+    <div
+      onClick={(event) => event.stopPropagation()}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 4,
+        zIndex: 200,
+        width: 285,
+        maxHeight: 360,
+        padding: 10,
+        borderRadius: 10,
+        background: "#ffffff",
+        border: "1px solid #cbd5e1",
+        boxShadow: "0 14px 35px rgba(15,23,42,.18)",
+        textAlign: "right",
+      }}
+    >
+      <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+        فیلتر {toPersianDigits(values.length)} مقدار
+      </div>
+
+      <input
+        className="input"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="جستجو در مقادیر..."
+        style={{ width: "100%", fontSize: 12, marginBottom: 8 }}
+        autoFocus
+      />
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={toggleVisibleValues}
+          style={{ flex: 1 }}
+        >
+          {allSelected ? "لغو انتخاب موارد نمایش‌داده‌شده" : "انتخاب موارد نمایش‌داده‌شده"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => onChange(null)}
+        >
+          همه
+        </button>
+      </div>
+
+      <div
+        style={{
+          maxHeight: 220,
+          overflowY: "auto",
+          border: "1px solid #e2e8f0",
+          borderRadius: 8,
+          padding: 5,
+        }}
+      >
+        {visibleValues.length === 0 ? (
+          <div style={{ padding: 12, textAlign: "center", color: "#64748b", fontSize: 12 }}>
+            مقداری پیدا نشد.
+          </div>
+        ) : (
+          visibleValues.map((value) => {
+            const checked = selected === null || selected.includes(value);
+            return (
+              <label
+                key={value}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 6px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleValue(value)}
+                />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {value}
+                </span>
+              </label>
+            );
+          })
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => onChange(null)}
+          style={{ flex: 1 }}
+        >
+          پاک کردن فیلتر
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-small"
+          onClick={onClose}
+          style={{ flex: 1 }}
+        >
+          بستن
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SummaryCard({
   label,
   value,
@@ -3144,17 +3888,77 @@ function SummaryCard({
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({
+  children,
+  width,
+  onResize,
+}: {
+  children: ReactNode;
+  width?: number;
+  onResize?: (delta: number) => void;
+}) {
   return (
     <th
       style={{
+        position: "relative",
         color: "#475569",
         fontSize: 12,
         fontWeight: 700,
         padding: "12px 10px",
+        width,
+        minWidth: width,
+        maxWidth: width,
+        whiteSpace: "nowrap",
       }}
     >
       {children}
+      {onResize && <ColumnResizeHandle onResize={onResize} />}
     </th>
+  );
+}
+
+function ColumnResizeHandle({
+  onResize,
+}: {
+  onResize: (delta: number) => void;
+}) {
+  function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX;
+      if (delta !== 0) {
+        onResize(delta);
+      }
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-label="تغییر عرض ستون"
+      onMouseDown={handleMouseDown}
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 7,
+        cursor: "col-resize",
+        zIndex: 10,
+      }}
+      title="برای تغییر عرض ستون بکشید"
+    />
   );
 }
