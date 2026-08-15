@@ -72,17 +72,31 @@ export default function LoginPage() {
         return;
       }
 
-      localStorage.setItem(
-        "dms_user",
-        JSON.stringify({
-          username: selectedUser.username,
-          role: selectedUser.role,
-          name: selectedUser.name,
-          supabase_user_id: data.user.id,
-        })
-      );
+      // ذخیره اطلاعات کمکی کاربر؛ اگر مرورگر موبایل اجازه localStorage نداد،
+      // نباید ورود موفق به سیستم را شکست‌خورده تلقی کنیم.
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+            "dms_user",
+            JSON.stringify({
+              username: selectedUser.username,
+              role: selectedUser.role,
+              name: selectedUser.name,
+              supabase_user_id: data.user.id,
+            })
+          );
+        }
+      } catch (storageError) {
+        console.warn("LOCAL STORAGE UNAVAILABLE:", storageError);
+      }
 
-      router.push(selectedUser.role === "manager" ? "/dashboard" : "/orders");
+      // Session اصلی توسط Supabase Auth مدیریت می‌شود؛
+      // localStorage فقط اطلاعات کمکی را نگه می‌دارد.
+      router.push(
+        selectedUser.role === "manager"
+          ? "/dashboard"
+          : "/orders"
+      );
     } catch (error: any) {
   console.error("LOGIN ERROR:", error);
 
