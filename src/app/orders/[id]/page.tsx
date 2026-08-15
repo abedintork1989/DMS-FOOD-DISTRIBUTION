@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import DatePicker from "react-multi-date-picker";
 import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
@@ -206,6 +207,8 @@ export default function OrderDetailPage() {
   const [pendingCartons, setPendingCartons] = useState<
     Record<string, string>
   >({});
+
+  const [importingExcel, setImportingExcel] = useState(false);
 
   useEffect(() => {
     if (id) loadOrder();
@@ -596,6 +599,225 @@ export default function OrderDetailPage() {
 
     setSelectedProductIds({});
     setPendingCartons({});
+  }
+
+
+  function normalizeExcelBarcode(value: unknown) {
+    return String(value ?? "")
+      .trim()
+      .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+      .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+      .replace(/\.0+$/, "");
+  }
+
+  async function downloadOrderExcelTemplate() {
+    try {
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        ["بارکد", "تعداد کارتن"],
+        ["بارکد کالای اول", 10],
+        ["بارکد کالای دوم", 5],
+        ["بارکد کالای سوم", 8],
+      ]);
+
+      worksheet["!cols"] = [{ wch: 22 }, { wch: 18 }];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "ثبت سفارش");
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([
+          ["راهنما"],
+          ["ستون «بارکد» باید با بارکد موجود در سیستم مطابقت داشته باشد."],
+          ["ستون «تعداد کارتن» تعداد نهایی موردنظر برای سفارش است."],
+          ["بعد از واردسازی، برای ذخیره نهایی روی «ثبت و تأیید سفارش» بزنید."],
+        ]),
+        "راهنما"
+      );
+
+      XLSX.writeFile(workbook, "نمونه فایل اکسل سفارش.xlsx");
+    } catch (error) {
+      console.error("EXCEL TEMPLATE ERROR:", error);
+      alert("ساخت فایل نمونه اکسل انجام نشد.");
+    }
+  }
+
+  async function importOrderQuantitiesFromExcel(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!isEditing || !canEditInOrdersPage) {
+      alert("ابتدا سفارش را وارد حالت ویرایش کنید.");
+      return;
+    }
+
+    setImportingExcel(true);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+
+      if (!sheetName) {
+        throw new Error("هیچ برگه‌ای در فایل اکسل پیدا نشد.");
+      }
+
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        workbook.Sheets[sheetName],
+        { defval: "" }
+      );
+
+      if (!rows.length) {
+        throw new Error("فایل اکسل خالی است.");
+      }
+
+      const headers = Object.keys(rows[0]);
+      const barcodeHeader = headers.find((h) => {
+        const value = h.trim().toLowerCase();
+        return value === "بارکد" || value === "barcode" || value === "کد کالا";
+      });
+
+      const quantityHeader = headers.find((h) => {
+        const value = h.trim().toLowerCase();
+        return (
+          value === "تعداد کارتن" ||
+          value === "تعداد" ||
+          value === "cartons" ||
+          value === "qty"
+        );
+      });
+
+      if (!barcodeHeader || !quantityHeader) {
+        throw new Error(
+          "فرمت فایل صحیح نیست. ستون‌های «بارکد» و «تعداد کارتن» را داشته باشید."
+        );
+      }
+
+      const { data: importedProducts, error: productsError } = await supabase
+        .from("products")
+        .select(`
+          id,
+          name,
+          barcode,
+          category,
+          image_url,
+          quantity_per_carton,
+          consumer_price
+        `)
+        .eq("active", true);
+
+      if (productsError) throw productsError;
+
+      const productMap = new Map<string, Product>();
+      (importedProducts || []).forEach((product: Product) => {
+        const barcode = normalizeExcelBarcode(product.barcode);
+        if (barcode) productMap.set(barcode, product);
+      });
+
+      const nextItems = [...editedItems];
+      const errors: string[] = [];
+      let updatedCount = 0;
+      let addedCount = 0;
+
+      rows.forEach((row, index) => {
+        const rowNumber = index + 2;
+        const barcode = normalizeExcelBarcode(row[barcodeHeader]);
+        const cartons = Number(normalizeExcelBarcode(row[quantityHeader]));
+
+        if (!barcode) {
+          errors.push(`ردیف ${rowNumber}: بارکد خالی است.`);
+          return;
+        }
+
+        if (!Number.isInteger(cartons) || cartons < 0) {
+          errors.push(`ردیف ${rowNumber}: تعداد کارتن معتبر نیست.`);
+          return;
+        }
+
+        const product = productMap.get(barcode);
+
+        if (!product) {
+          errors.push(
+            `ردیف ${rowNumber}: بارکد ${barcode} در سیستم پیدا نشد.`
+          );
+          return;
+        }
+
+        const cartonSize = Math.max(
+          Number(product.quantity_per_carton || 1),
+          1
+        );
+
+        const consumerPrice = Number(product.consumer_price || 0);
+        const discountPercent = getDiscountForCategory(product.category);
+        const finalPrice = Math.round(
+          consumerPrice - (consumerPrice * discountPercent) / 100
+        );
+
+        const total = cartons * cartonSize * finalPrice;
+
+        const existingIndex = nextItems.findIndex(
+          (item: any) => item.product_id === product.id
+        );
+
+        if (existingIndex >= 0) {
+          nextItems[existingIndex] = {
+            ...nextItems[existingIndex],
+            final_order_quantity: cartons,
+            consumer_price: consumerPrice,
+            discount_percent: discountPercent,
+            purchase_price: finalPrice,
+            total_purchase_price: total,
+            final_price: finalPrice,
+            products: product,
+          };
+          updatedCount += 1;
+        } else {
+          nextItems.push({
+            id: `excel-${product.id}-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2)}`,
+            order_id: id,
+            product_id: product.id,
+            quantity: 0,
+            final_order_quantity: cartons,
+            consumer_price: consumerPrice,
+            discount_percent: discountPercent,
+            purchase_price: finalPrice,
+            total_purchase_price: total,
+            final_price: finalPrice,
+            products: product,
+            isNew: true,
+          });
+          addedCount += 1;
+        }
+      });
+
+      setEditedItems(nextItems);
+
+      let message =
+        `واردسازی اکسل انجام شد.\n\n` +
+        `به‌روزرسانی: ${updatedCount} کالا\n` +
+        `افزوده‌شده: ${addedCount} کالا`;
+
+      if (errors.length) {
+        message += `\nخطاها: ${errors.length}\n\n${errors
+          .slice(0, 10)
+          .join("\n")}`;
+      }
+
+      alert(
+        `${message}\n\nبرای ذخیره نهایی، روی «ثبت و تأیید سفارش» کلیک کنید.`
+      );
+    } catch (error: any) {
+      console.error("EXCEL IMPORT ERROR:", error);
+      alert(error?.message || "خطایی در خواندن فایل اکسل رخ داد.");
+    } finally {
+      setImportingExcel(false);
+    }
   }
 
   function getStatusLabel(status: any) {
@@ -1318,6 +1540,40 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
               <button className="btn btn-primary" onClick={openAddProduct}>
                 ➕ افزودن کالای جدید
               </button>
+              <label
+                className="btn btn-success"
+                style={{
+                  position: "relative",
+                  overflow: "hidden",
+                  cursor: importingExcel ? "wait" : "pointer",
+                }}
+              >
+                {importingExcel ? "در حال خواندن اکسل..." : "📥 بارگذاری از اکسل"}
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  disabled={saving || importingExcel}
+                  onChange={importOrderQuantitiesFromExcel}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    opacity: 0                    ,
+                    cursor: importingExcel ? "wait" : "pointer",
+                  }}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={downloadOrderExcelTemplate}
+                disabled={saving || importingExcel}
+              >
+                📄 نمونه فایل اکسل
+              </button>
+
 
               <button className="btn btn-primary" onClick={approveOrder} disabled={saving}>
                 {saving ? "در حال ثبت..." : "✅ ثبت و تأیید سفارش"}
