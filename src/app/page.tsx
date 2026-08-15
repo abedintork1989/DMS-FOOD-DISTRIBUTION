@@ -83,9 +83,15 @@ export default function LoginPage() {
       );
 
       router.push(selectedUser.role === "manager" ? "/dashboard" : "/orders");
-    } catch {
-      setError("خطایی هنگام ورود رخ داد.");
-    } finally {
+    } catch (error: any) {
+  console.error("LOGIN ERROR:", error);
+
+  setError(
+    error?.message
+      ? `خطای ورود: ${error.message}`
+      : "خطای ناشناخته هنگام ورود رخ داد."
+  );
+} finally {
       setLoading(false);
     }
   }
