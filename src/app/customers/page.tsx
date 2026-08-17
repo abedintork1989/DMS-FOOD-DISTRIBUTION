@@ -15,6 +15,8 @@ type Customer = {
   owner_name: string | null;
   phone: string | null;
   province: string | null;
+  city: string | null;
+  customer_type: string | null;
   address: string | null;
   visitor: string | null;
   responsible: string | null;
@@ -42,7 +44,23 @@ export default function CustomersPage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  type FilterKey = "province" | "city" | "customer_type" | "name" | "visitor" | "status";
+
   const [search, setSearch] = useState("");
+
+  const [filterSelections, setFilterSelections] = useState<Record<FilterKey, string[]>>({
+    province: [],
+    city: [],
+    customer_type: [],
+    name: [],
+    visitor: [],
+    status: [],
+  });
+
+  const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [sortKey, setSortKey] = useState<FilterKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,6 +85,8 @@ export default function CustomersPage() {
           owner_name,
           phone,
           province,
+          city,
+          customer_type,
           address,
           visitor,
           responsible,
@@ -283,14 +303,101 @@ export default function CustomersPage() {
     }
   }
 
-  const filteredCustomers = customers.filter(c => {
-    const text = [c.name, c.owner_name, c.phone, c.province, c.visitor]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+  const filterLabels: Record<FilterKey, string> = {
+    name: "نام شعبه",
+    customer_type: "نوع مشتری",
+    province: "استان",
+    city: "شهر",
+    visitor: "نام ویزیتور",
+    status: "وضعیت",
+  };
 
-    return text.includes(search.toLowerCase());
-  });
+  function getFilterValue(customer: Customer, key: FilterKey) {
+    if (key === "status") return customer.active ? "فعال" : "غیرفعال";
+    if (key === "province") return customer.province || "";
+    if (key === "city") return customer.city || "";
+    if (key === "customer_type") return customer.customer_type || "";
+    if (key === "name") return customer.name || "";
+    return customer.visitor || "";
+  }
+
+  function getUniqueFilterValues(key: FilterKey) {
+    return Array.from(
+      new Set(
+        customers
+          .map(customer => getFilterValue(customer, key))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fa"));
+  }
+
+  function toggleFilterValue(key: FilterKey, value: string) {
+    setFilterSelections(current => {
+      const selected = current[key];
+      const next = selected.includes(value)
+        ? selected.filter(item => item !== value)
+        : [...selected, value];
+
+      return {
+        ...current,
+        [key]: next,
+      };
+    });
+  }
+
+  function clearAllFilters() {
+    setFilterSelections({
+      province: [],
+      city: [],
+      customer_type: [],
+      name: [],
+      visitor: [],
+      status: [],
+    });
+    setOpenFilter(null);
+    setFilterSearch("");
+    setSortKey(null);
+  }
+
+  function sortByFilter(key: FilterKey, direction: "asc" | "desc") {
+    setSortKey(key);
+    setSortDirection(direction);
+  }
+
+  const filteredCustomers = [...customers]
+    .filter(customer => {
+      const globalText = [
+        customer.name,
+        customer.owner_name,
+        customer.phone,
+        customer.province,
+        customer.city,
+        customer.customer_type,
+        customer.visitor,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (!globalText.includes(search.toLowerCase())) {
+        return false;
+      }
+
+      return (Object.keys(filterSelections) as FilterKey[]).every(key => {
+        const selected = filterSelections[key];
+        if (selected.length === 0) return true;
+        return selected.includes(getFilterValue(customer, key));
+      });
+    })
+    .sort((a, b) => {
+      if (!sortKey) return 0;
+
+      const av = getFilterValue(a, sortKey);
+      const bv = getFilterValue(b, sortKey);
+
+      const result = av.localeCompare(bv, "fa");
+      return sortDirection === "asc" ? result : -result;
+    });
 
   return (
     <AppShell>
@@ -300,71 +407,317 @@ export default function CustomersPage() {
         subtitle="مدیریت اطلاعات مشتریان"
       />
 
-      <div className="panel">
-
-        <div
+      {/* دکمه ثبت مشتری در ردیف بالای نوار فیلتر */}
+      <div
+        dir="rtl"
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: 8,
+          marginTop : -110 ,
+         
+        }}
+      >
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => router.push("/customers/new")}
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 20,
-            flexWrap: "wrap"
+            height: 42,
+            minWidth: 126,
+            padding: "0 16px",
+            fontSize: 13,
+            fontWeight: 900,
+            borderRadius: 8,
           }}
         >
+          <Plus size={15} />
+          مشتری جدید
+        </button>
+      </div>
 
-          <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
+            {/* نوار فیلتر مستقل از جدول */}
+      <div
+        dir="rtl"
+        style={{
+          width: "70%",
+          marginBottom: 50,
+          display: "flex",
+          justifyContent: "center",
+          marginRight : 200 , 
+          marginTop : -50 ,
 
-            <Search
-              size={18}
-              style={{
-                position: "absolute",
-                right: 12,
-                top: 12,
-                color: "#94a3b8"
-              }}
-            />
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "stretch",
+            direction: "rtl",
+            background: "#f2f4f3",
+            border: "1px solid #cfd6d2",
+            borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(15,23,42,0.06)",
+            overflow: "visible",
+          }}
+        >
+          {(Object.keys(filterLabels) as FilterKey[]).map(key => {
+            const isOpen = openFilter === key;
+            const selected = filterSelections[key];
 
-            <input
-              className="input"
-              style={{ paddingRight: 40 }}
-              placeholder="جستجوی مشتری..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            const values = getUniqueFilterValues(key).filter(value =>
+              value.toLowerCase().includes(filterSearch.toLowerCase())
+            );
 
-          </div>
+            return (
+              <div
+                key={key}
+                style={{
+                  position: "relative",
+                  flex: "1 1 0",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenFilter(current => current === key ? null : key);
+                    setFilterSearch("");
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    border: "0",
+                    borderLeft: "1px solid #cfd6d2",
+                    borderRadius: 0,
+                    background: selected.length ? "#149b5c" : "#f2f4f3",
+                    color: selected.length ? "#fff" : "#1f2937",
+                    fontWeight: selected.length ? 800 : 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    padding: "0 10px",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selected.length
+                      ? `${filterLabels[key]} (${selected.length})`
+                      : filterLabels[key]}
+                  </span>
+
+                  <span style={{ fontSize: 10 }}>
+                    {isOpen ? "▲" : "▼"}
+                  </span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 4px)",
+                      width: 300,
+                      zIndex: 10000,
+                      background: "#fff",
+                      border: "1px solid #cfd6d2",
+                      borderRadius: 8,
+                      boxShadow: "0 14px 30px rgba(15,23,42,.14)",
+                      padding: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 6,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "asc")}
+                      >
+                        مرتب‌سازی صعودی
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "desc")}
+                      >
+                        مرتب‌سازی نزولی
+                      </button>
+                    </div>
+
+                    <input
+                      className="input"
+                      placeholder={`جستجو در ${filterLabels[key]}...`}
+                      value={filterSearch}
+                      onChange={e => setFilterSearch(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span>انتخاب چند مقدار</span>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#0f6b43",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections(current => ({
+                              ...current,
+                              [key]: [...getUniqueFilterValues(key)],
+                            }))
+                          }
+                        >
+                          انتخاب همه
+                        </button>
+
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections(current => ({
+                              ...current,
+                              [key]: [],
+                            }))
+                          }
+                        >
+                          پاک‌کردن
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {values.map(value => (
+                        <label
+                          key={value}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "7px 4px",
+                            cursor: "pointer",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(value)}
+                            onChange={() => toggleFilterValue(key, value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))}
+
+                      {values.length === 0 && (
+                        <div
+                          style={{
+                            padding: 12,
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          مقداری پیدا نشد
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           <button
-            className="btn btn-primary"
-            onClick={() => router.push("/customers/new")}
+            type="button"
+            onClick={clearAllFilters}
+            style={{
+              flex: "0 0 108px",
+              height: 42,
+              border: "0",
+              background: "#dc2626",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
           >
-            <Plus size={16} />
-            مشتری جدید
+            حذف فیلتر
           </button>
 
-        </div>
 
+        </div>
+      </div>
+
+      <div
+  className="panel"
+  style={{
+    width: "100%",
+    margin: "0 auto",
+  }}
+>
         <div className="table-wrap">
 
           {
             loading ?
-              <div style={{ padding: 40, textAlign: "center" }}>
+              <div style={{ padding: 40, textAlign: "center"    }}>
                 در حال دریافت اطلاعات...
               </div>
               :
-              <table>
+              <table
+                style={{
+                  width: "100%",
+                  tableLayout: "fixed",
+                }}
+              >
 
-                <thead>
+                <thead style={{ fontWeight: 900, color: "#000000" }}>
                   <tr>
-                    <th>نام مشتری</th>
-                    <th>تعداد شعبه</th>
-                    <th>مالک</th>
-                    <th>تلفن</th>
-                    <th>استان</th>
-                    <th>ویزیتور</th>
-                    <th>وضعیت</th>
-                    <th>عملیات</th>
+                    <th style={{ textAlign: "center" }}>نام شعبه</th>
+                    <th style={{ textAlign: "center" }}>نوع مشتری</th>
+                    <th style={{ textAlign: "center" }}>تعداد شعبه</th>
+                    <th style={{ textAlign: "center" }}>استان</th>
+                    <th style={{ textAlign: "center" }}>شهر</th>
+                    <th style={{ textAlign: "center" }}>ویزیتور</th>
+                    <th style={{ textAlign: "center" }}>وضعیت</th>
+                    <th
+                      style={{
+                        textAlign: "center",
+                        width: "180px",
+                      }}
+                    >
+                      عملیات
+                    </th>
                   </tr>
                 </thead>
 
@@ -379,31 +732,20 @@ export default function CustomersPage() {
                         onClick={() => openCustomer(customer.id)}
                       >
 
-                        <td>
-                          <strong>{customer.name}</strong>
-                          {customer.is_group_parent && (
-                            <div
-                              style={{
-                                marginTop: 4,
-                                fontSize: 12,
-                                color: "#64748b",
-                              }}
-                            >
-                              مجموعه مشتری
-                            </div>
-                          )}
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                          {customer.name}
                         </td>
-                        <td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.customer_type || "-"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
                           {customer.branch_count > 0
                             ? customer.branch_count.toLocaleString("fa-IR")
                             : "-"}
                         </td>
-                        <td>{customer.owner_name || "-"}</td>
-                        <td>{customer.phone || "-"}</td>
-                        <td>{customer.province || "-"}</td>
-                        <td>{customer.visitor || "-"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.province || "-"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.city || "-"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.visitor || "-"}</td>
 
-                        <td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
                           <span
                             className={customer.active ? "badge success" : "badge danger"}
                           >
@@ -411,8 +753,15 @@ export default function CustomersPage() {
                           </span>
                         </td>
 
-                        <td>
-                          <div style={{ display: "flex", gap: 8 }}>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "center",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
 
                             <button
                               className="btn btn-secondary btn-small"

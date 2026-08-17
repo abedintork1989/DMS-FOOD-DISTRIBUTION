@@ -1,8 +1,10 @@
 "use client";
 import BackButton from "@/components/BackButton";
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
+  MapPin,
   Trash2,
   Upload,
   Download,
@@ -15,6 +17,26 @@ import {
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
 import { supabase } from "@/lib/supabase";
+
+// نقشه فقط سمت کلاینت لود می‌شود چون Leaflet به window نیاز دارد
+// و در رندر سمت سرور Next.js باعث کرش می‌شود.
+const LocationPickerMap = dynamic(
+  () => import("@/components/Map/MapPicker"),
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        color: "#64748b"
+      }}>
+        در حال بارگذاری نقشه...
+      </div>
+    )
+  }
+);
 
 
 
@@ -40,10 +62,13 @@ type Customer = {
   province:string | null;
 
 
-  responsible:string | null;
+    city:string | null;
+  customer_type:string | null;
+responsible:string | null;
 
 
   visitor:string | null;
+  sales_visitor_id:string | null;
 
 
   entry_fee:number | null;
@@ -57,6 +82,17 @@ type Customer = {
 
 
 
+
+type CustomerLocation = {
+  customer_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy_meters: number | null;
+  source: string | null;
+  geocoded_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 type CustomerGroup = {
   id: string;
@@ -72,8 +108,16 @@ type BranchCustomer = {
   address: string | null;
   phone: string | null;
   visitor: string | null;
+  sales_visitor_id: string | null;
   responsible: string | null;
   customer_group_id: string | null;
+};
+
+type VisitorOption = {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  active: boolean;
 };
 
 type Discount = {
@@ -111,6 +155,106 @@ type Media = {
 };
 
 
+
+
+function LeafletLocationPicker({
+  open,
+  initialLocation,
+  saving,
+  onClose,
+  onSave,
+}:{
+  open:boolean;
+  initialLocation:{latitude:number;longitude:number}|null;
+  saving:boolean;
+  onClose:()=>void;
+  onSave:(latitude:number,longitude:number)=>void;
+}){
+
+  const [selected,setSelected]=useState(initialLocation);
+
+  useEffect(()=>{
+    if(open){
+      setSelected(initialLocation);
+    }
+  },[open,initialLocation]);
+
+
+  if(!open) return null;
+
+  return (
+    <div style={{
+      position:"fixed",
+      inset:0,
+      zIndex:99999,
+      background:"rgba(15,23,42,.58)",
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      padding:18
+    }}>
+      <div style={{
+        width:"min(1100px,100%)",
+        height:"min(760px,92vh)",
+        background:"#fff",
+        borderRadius:18,
+        overflow:"hidden",
+        display:"flex",
+        flexDirection:"column"
+      }}>
+
+        <div style={{
+          padding:16,
+          borderBottom:"1px solid #e2e8f0",
+          display:"flex",
+          justifyContent:"space-between"
+        }}>
+          <div>
+            <strong>ثبت موقعیت جغرافیایی مشتری</strong>
+            <div style={{fontSize:12,color:"#64748b"}}>
+              روی نقشه کلیک کنید یا نشانگر را جابه‌جا کنید.
+            </div>
+          </div>
+
+          <button className="btn btn-secondary btn-small" onClick={onClose}>
+            بستن
+          </button>
+        </div>
+
+
+        <div style={{flex:1}}>
+          <LocationPickerMap
+            selected={selected}
+            onChange={setSelected}
+          />
+        </div>
+
+
+        <div style={{
+          padding:14,
+          borderTop:"1px solid #e2e8f0",
+          display:"flex",
+          justifyContent:"space-between"
+        }}>
+          <span>
+            {selected
+            ? `${selected.latitude.toFixed(6)} , ${selected.longitude.toFixed(6)}`
+            :"یک نقطه انتخاب کنید"}
+          </span>
+
+          <button
+            className="btn btn-primary"
+            disabled={!selected || saving}
+            onClick={()=>selected && onSave(selected.latitude,selected.longitude)}
+          >
+            {saving ? "در حال ذخیره..." : "ثبت موقعیت"}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
 
 
 export default function CustomerDetailPage(){
@@ -157,6 +301,21 @@ useState<string[]>([]);
 const [media,setMedia]=
 useState<Media[]>([]);
 
+const [customerLocation,setCustomerLocation]=
+useState<CustomerLocation | null>(null);
+
+const [pendingLocation,setPendingLocation]=
+useState<{latitude:number;longitude:number}|null>(null);
+
+const [showLocationPicker,setShowLocationPicker]=
+useState(false);
+
+const [locationSaving,setLocationSaving]=
+useState(false);
+
+const [locationAddressLoading,setLocationAddressLoading]=
+useState(false);
+
 
 
 
@@ -190,6 +349,12 @@ useState<BranchCustomer[]>([]);
 const [groupLoading,setGroupLoading]=
 useState(false);
 
+const [visitors,setVisitors]=
+useState<VisitorOption[]>([]);
+
+const [visitorsLoading,setVisitorsLoading]=
+useState(false);
+
 
 
 
@@ -216,12 +381,13 @@ address:"",
 province:"",
 
 
-responsible:"",
+city:"",
+  customer_type: initialGroupId ? "زنجیره‌ای" : "مویرگی",
+    responsible:"",
 
 
 visitor:"",
-
-
+visitor_id:"",
 entry_fee:0,
 
 
@@ -251,6 +417,7 @@ if(isNewCustomer){
 
  setEdit(true);
  setLoading(false);
+ loadVisitors();
 
 
  setForm({
@@ -259,8 +426,11 @@ if(isNewCustomer){
   phone:"",
   address:"",
   province:"",
-  responsible:"",
+  city:"",
+   customer_type:"مویرگی",
+   responsible:"",
   visitor:"",
+  visitor_id:"",
   entry_fee:0,
   settlement_days:0,
   notes:"",
@@ -277,12 +447,14 @@ if(isNewCustomer){
 
 
 loadCustomer();
+loadVisitors();
 
 
 loadCategories();
 
 
 loadMedia();
+loadCustomerLocation();
 
 
 loadCustomerGroup();
@@ -293,6 +465,179 @@ loadCustomerGroup();
 
 
 
+
+async function loadVisitors(){
+  setVisitorsLoading(true);
+
+  try{
+    const {data,error}=await supabase
+      .from("sales_visitors")
+      .select("id,full_name,phone,active")
+      .eq("active",true)
+      .order("full_name",{ascending:true});
+
+    if(error){
+      console.error("LOAD VISITORS ERROR:",error);
+      setVisitors([]);
+      return;
+    }
+
+    setVisitors(
+      (data || [])
+        .map((visitor:any)=>({
+          id:String(visitor.id),
+          full_name:String(visitor.full_name || ""),
+          phone:visitor.phone ? String(visitor.phone) : null,
+          active:visitor.active !== false
+        }))
+        .filter((visitor:VisitorOption)=>visitor.full_name)
+    );
+  }finally{
+    setVisitorsLoading(false);
+  }
+}
+
+async function loadCustomerLocation(){
+  if(!customerId || isNewCustomer){
+    setCustomerLocation(null);
+    return;
+  }
+
+  const {data,error}=await supabase
+    .from("customer_locations")
+    .select("*")
+    .eq("customer_id",customerId)
+    .maybeSingle();
+
+  if(error){
+    console.error("LOAD CUSTOMER LOCATION ERROR:",error);
+    setCustomerLocation(null);
+    return;
+  }
+
+  if(data){
+    setCustomerLocation({
+      customer_id:String(data.customer_id),
+      latitude:Number(data.latitude),
+      longitude:Number(data.longitude),
+      accuracy_meters:
+        data.accuracy_meters == null ? null : Number(data.accuracy_meters),
+      source:data.source || null,
+      geocoded_at:data.geocoded_at || null,
+      created_at:String(data.created_at || ""),
+      updated_at:String(data.updated_at || ""),
+    });
+  }else{
+    setCustomerLocation(null);
+  }
+}
+
+async function reverseGeocodeLocation(latitude:number,longitude:number){
+  const response = await fetch(
+    `/api/geocode/reverse?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`,
+    { cache: "no-store" }
+  );
+
+  const result = await response.json().catch(() => null);
+
+  if(!response.ok){
+    throw new Error(result?.error || "دریافت آدرس از روی موقعیت جغرافیایی ناموفق بود.");
+  }
+
+  return {
+    address: String(result?.address || "").trim(),
+    province: result?.province ? String(result.province).trim() : "",
+    city: result?.city ? String(result.city).trim() : "",
+  };
+}
+
+async function saveCustomerLocation(latitude:number,longitude:number){
+  setLocationSaving(true);
+  setLocationAddressLoading(true);
+
+  try{
+    const geocode = await reverseGeocodeLocation(latitude,longitude);
+
+    if(!geocode.address){
+      throw new Error("برای این نقطه آدرس قابل شناسایی پیدا نشد. یک نقطه دقیق‌تر روی نقشه انتخاب کنید.");
+    }
+
+    if(isNewCustomer){
+      setPendingLocation({
+        latitude,
+        longitude,
+      });
+
+      setForm(current => ({
+        ...current,
+        address:geocode.address,
+        province:geocode.province || "",
+        city:geocode.city || "",
+      }));
+
+      setShowLocationPicker(false);
+      alert("موقعیت انتخاب شد و آدرس، استان و شهر از روی نقشه دریافت شد. با ذخیره مشتری، موقعیت نیز ثبت می‌شود.");
+    }else{
+      const now = new Date().toISOString();
+
+      const {data,error}=await supabase
+        .from("customer_locations")
+        .upsert({
+          customer_id:customerId,
+          latitude,
+          longitude,
+          accuracy_meters:null,
+          source:"manual",
+          geocoded_at:now,
+          updated_at:now,
+        },{onConflict:"customer_id"})
+        .select("*")
+        .single();
+
+      if(error) throw error;
+
+      const { error: customerAddressError } = await supabase
+        .from("customers")
+        .update({
+          address: geocode.address,
+          province: geocode.province || null,
+          city: geocode.city || null,
+        })
+        .eq("id",customerId);
+
+      if(customerAddressError) throw customerAddressError;
+
+      setCustomerLocation({
+        customer_id:String(data.customer_id),
+        latitude:Number(data.latitude),
+        longitude:Number(data.longitude),
+        accuracy_meters:data.accuracy_meters == null ? null : Number(data.accuracy_meters),
+        source:data.source || null,
+        geocoded_at:data.geocoded_at || null,
+        created_at:String(data.created_at || ""),
+        updated_at:String(data.updated_at || ""),
+      });
+
+      setPendingLocation(null);
+
+      setForm(current => ({
+        ...current,
+        address:geocode.address,
+        province:geocode.province || "",
+        city:geocode.city || "",
+      }));
+
+      setShowLocationPicker(false);
+      alert("موقعیت ثبت شد و آدرس مشتری به‌صورت خودکار از روی نقشه دریافت شد.");
+    }
+  }catch(error:any){
+    console.error("SAVE CUSTOMER LOCATION ERROR:",error);
+    alert(`خطا در ثبت موقعیت جغرافیایی یا دریافت آدرس:\n${error?.message || "نامشخص"}`);
+  }finally{
+    setLocationSaving(false);
+    setLocationAddressLoading(false);
+  }
+}
 
 async function loadCustomer(){
 
@@ -340,6 +685,15 @@ setCustomer(data);
 
 
 
+const legacyVisitorId =
+  data.sales_visitor_id ||
+  visitors.find(
+    (visitor) =>
+      visitor.full_name.trim() ===
+      String(data.visitor || "").trim()
+  )?.id ||
+  "";
+
 setForm({
 
 
@@ -358,10 +712,13 @@ address:data.address || "",
 province:data.province || "",
 
 
-responsible:data.responsible || "",
+city:data.city || "",
+    customer_type: data.customer_group_id ? "زنجیره‌ای" : (data.customer_type || "مویرگی"),
+    responsible:data.responsible || "",
 
 
 visitor:data.visitor || "",
+visitor_id:data.sales_visitor_id || "",
 
 
 entry_fee:data.entry_fee || 0,
@@ -445,7 +802,7 @@ async function loadCustomerGroup(){
     if (isGroupParent) {
       const {data:branches,error:branchError}=await supabase
         .from("customers")
-        .select("id,name,province,address,phone,visitor,responsible,customer_group_id")
+        .select("id,name,province,address,phone,visitor,sales_visitor_id,responsible,customer_group_id")
         .eq("customer_group_id",groupId)
         .neq("id",customerId)
         .order("name",{ascending:true});
@@ -476,6 +833,11 @@ async function createCustomerGroup(){
 
   if(customerGroup){
     alert("این مشتری از قبل عضو یک مجموعه است.");
+    return;
+  }
+
+  if((form.customer_type || "مویرگی") !== "زنجیره‌ای"){
+    alert("فقط مشتری از نوع «زنجیره‌ای» می‌تواند مجموعه و شعبه زیرمجموعه داشته باشد.");
     return;
   }
 
@@ -527,6 +889,11 @@ async function createCustomerGroup(){
 }
 
 function addBranch(){
+  if((form.customer_type || "مویرگی") !== "زنجیره‌ای"){
+    alert("فقط مشتری از نوع «زنجیره‌ای» می‌تواند شعبه زیرمجموعه داشته باشد.");
+    return;
+  }
+
   if(!customerGroup){
     alert("ابتدا این مشتری را به عنوان مجموعه مادر ثبت کنید.");
     return;
@@ -681,6 +1048,40 @@ async function saveCustomer(){
 
 if(isNewCustomer){
 
+if(initialGroupId){
+  const {data:parent,error:parentError}=await supabase
+    .from("customer_groups")
+    .select("id,primary_customer_id")
+    .eq("id",initialGroupId)
+    .maybeSingle();
+
+  if(parentError){
+    alert("امکان بررسی مجموعه مادر وجود ندارد:\n"+parentError.message);
+    return;
+  }
+
+  if(parent?.primary_customer_id){
+    const {data:parentCustomer,error:parentCustomerError}=await supabase
+      .from("customers")
+      .select("customer_type")
+      .eq("id",parent.primary_customer_id)
+      .maybeSingle();
+
+    if(parentCustomerError){
+      alert("امکان بررسی نوع مشتری مادر وجود ندارد:\n"+parentCustomerError.message);
+      return;
+    }
+
+    if(parentCustomer?.customer_type !== "زنجیره‌ای"){
+      alert("فقط مشتری زنجیره‌ای می‌تواند شعبه زیرمجموعه داشته باشد.");
+      return;
+    }
+  }
+}
+
+const forcedCustomerType = initialGroupId
+  ? "زنجیره‌ای"
+  : (form.customer_type || "مویرگی");
 
 const {data,error}=await supabase
 .from("customers")
@@ -689,9 +1090,12 @@ const {data,error}=await supabase
  owner_name:form.owner_name || null,
  phone:form.phone || null,
  address:form.address || null,
- province:form.province || null,
- responsible:form.responsible || null,
+ province:null,
+   city:null,
+   customer_type:forcedCustomerType,
+  responsible:form.responsible || null,
  visitor:form.visitor || null,
+ sales_visitor_id:form.visitor_id || null,
  entry_fee:Number(form.entry_fee) || 0,
  settlement_days:Number(form.settlement_days) || 0,
  notes:form.notes || null,
@@ -711,9 +1115,32 @@ if(error){
 
 
 if(data?.id){
- router.push(`/customers/${data.id}`);
-}
+  if(pendingLocation){
+    const now = new Date().toISOString();
 
+    const { error: locationError } = await supabase
+      .from("customer_locations")
+      .upsert({
+        customer_id:data.id,
+        latitude:pendingLocation.latitude,
+        longitude:pendingLocation.longitude,
+        accuracy_meters:null,
+        source:"manual",
+        geocoded_at:now,
+        updated_at:now,
+      },{onConflict:"customer_id"});
+
+    if(locationError){
+      console.error("SAVE NEW CUSTOMER LOCATION ERROR:", locationError);
+      alert(
+        "مشتری ساخته شد، اما موقعیت جغرافیایی ذخیره نشد:\n" +
+        locationError.message
+      );
+    }
+  }
+
+  router.push(`/customers/${data.id}`);
+}
 
 return;
 
@@ -723,76 +1150,74 @@ return;
 
 
 
-const {error}=await supabase
+const selectedCustomerType =
+  customerGroup && customerGroup.primary_customer_id !== customerId
+    ? "زنجیره‌ای"
+    : (form.customer_type || "مویرگی");
 
+  const {error}=await supabase
+    .from("customers")
+    .update({
+      name:form.name,
+      owner_name:form.owner_name,
+      phone:form.phone,
+      address:form.address,
+      responsible:form.responsible,
+      visitor:form.visitor,
+      sales_visitor_id:form.visitor_id || null,
+      entry_fee:Number(form.entry_fee),
+      settlement_days:Number(form.settlement_days),
+      notes:form.notes,
+      customer_type:selectedCustomerType,
+      customer_group_id: form.customer_group_id || null
+    })
+    .eq("id",customerId);
 
-.from("customers")
+  if(error){
+    alert(
+      "خطا در ذخیره اطلاعات:\n"+
+      error.message
+    );
+    return;
+  }
 
+  // اگر این مشتری «مادر مجموعه» باشد، نوع مشتری برای تمام شعبه‌های
+  // همان مجموعه نیز دقیقاً یکسان می‌شود.
+  if (
+    customerGroup &&
+    customerGroup.primary_customer_id === customerId
+  ) {
+    const { error: branchTypeError } = await supabase
+      .from("customers")
+      .update({
+        customer_type: selectedCustomerType,
+      })
+      .eq("customer_group_id", customerGroup.id)
+      .neq("id", customerId);
 
-.update({
+    if (branchTypeError) {
+      console.error("UPDATE BRANCH CUSTOMER TYPES ERROR:", branchTypeError);
+      alert(
+        "اطلاعات مشتری مادر ذخیره شد، اما نوع مشتری شعبه‌ها به‌روزرسانی نشد:\n" +
+        branchTypeError.message
+      );
+      await loadCustomer();
+      await loadCustomerGroup();
+      return;
+    }
+  }
 
+  await loadCustomer();
+  await loadCustomerGroup();
 
-name:form.name,
+  alert(
+    customerGroup &&
+    customerGroup.primary_customer_id === customerId
+      ? "اطلاعات مشتری مادر ذخیره شد و نوع مشتری تمام شعبه‌ها نیز به‌روزرسانی شد."
+      : "اطلاعات مشتری ذخیره شد"
+  );
 
-
-owner_name:form.owner_name,
-
-
-phone:form.phone,
-
-
-address:form.address,
-
-
-province:form.province,
-
-
-responsible:form.responsible,
-
-
-visitor:form.visitor,
-
-
-entry_fee:Number(form.entry_fee),
-
-
-settlement_days:Number(form.settlement_days),
-
-
-notes:form.notes,
-customer_group_id: form.customer_group_id || null
-
-
-})
-
-
-.eq("id",customerId);
-
-
-
-
-if(error){
-
-
-alert(
-"خطا در ذخیره اطلاعات:\n"+
-error.message
-);
-
-
-return;
-
-
-}
-
-
-
-
-alert("اطلاعات مشتری ذخیره شد");
-
-
-
-setEdit(false);
+  setEdit(false);
 
 
 
@@ -1389,128 +1814,199 @@ phone:e.target.value
 
 
 <input
-
-
-className="input"
-
-
-disabled={!edit}
-
-
-value={form.province}
-
-
-onChange={e=>
-
-
-setForm({
-
-
-...form,
-
-
-province:e.target.value
-
-
-})
-
-
-}
-
-
-/>
+          className="input"
+          readOnly
+          value={form.province}
+          placeholder="پس از ثبت موقعیت روی نقشه تعیین می‌شود."
+          style={{
+            background:"#f8fafc",
+            cursor:"not-allowed"
+          }}
+        />
 
 
 </div>
 
 
       <div className="form-field">
+        <label>
+          شهر
+        </label>
 
+        <input
+          className="input"
+          readOnly
+          value={form.city}
+          placeholder="پس از ثبت موقعیت روی نقشه تعیین می‌شود."
+          style={{
+            background:"#f8fafc",
+            cursor:"not-allowed"
+          }}
+        />
+      </div>
 
+      <div className="form-field">
+        <label>
+          نوع مشتری
+        </label>
+
+        <select
+          className="input"
+          disabled={!edit || isBranchCreate}
+          value={form.customer_type}
+          onChange={e =>
+            setForm({
+              ...form,
+              customer_type:e.target.value
+            })
+          }
+        >
+          <option value="زنجیره‌ای">زنجیره‌ای</option>
+          <option value="VIP">VIP</option>
+          <option value="مویرگی">مویرگی</option>
+        </select>
+
+        {isBranchCreate && (
+          <small style={{display:"block",marginTop:6,color:"#64748b"}}>
+            نوع این شعبه به‌صورت خودکار «زنجیره‌ای» است چون زیرمجموعه مشتری مادر زنجیره‌ای ایجاد شده و قابل تغییر نیست.
+          </small>
+        )}
+      </div>
+
+      <div
+        className="form-field full"
+        style={{gridColumn:"1 / -1"}}
+      >
         <label>
           آدرس
         </label>
 
-
         <input
-
-
-        className="input"
-
-
-        disabled={!edit}
-
-
-        value={form.address}
-
-
-        onChange={e=>
-
-
-        setForm({
-
-
-        ...form,
-
-
-        address:e.target.value
-
-
-        })
-
-
-        }
-
-
+          className="input"
+          readOnly
+          value={form.address}
+          placeholder="پس از ثبت موقعیت روی نقشه، آدرس به‌صورت خودکار درج می‌شود."
+          style={{
+            background:"#f8fafc",
+            cursor:"not-allowed",
+            width:"100%",
+          }}
         />
 
+        <small style={{display:"block",marginTop:6,color:"#64748b"}}>
+          آدرس فقط از روی موقعیت جغرافیایی مشتری تعیین می‌شود و قابل ورود دستی نیست.
+        </small>
+      </div>
 
+      <div className="form-field full" style={{gridColumn:"1 / -1"}}>
+        <label>موقعیت جغرافیایی</label>
+         <small style={{display:"block",marginTop:4,color:"#64748b"}}>
+           استان و شهر فقط از روی موقعیت انتخاب‌شده روی نقشه تعیین می‌شوند و دستی قابل ویرایش نیستند.
+         </small>
+        <div style={{
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          gap:12,flexWrap:"wrap",padding:12,
+          border:"1px solid #dbe3ea",borderRadius:12,background:"#f8fafc"
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <div style={{
+              width:38,height:38,borderRadius:10,background:"#e9f4ef",
+              color:"#0f6b43",display:"grid",placeItems:"center"
+            }}>
+              <MapPin size={19}/>
+            </div>
+            <div>
+              <strong style={{display:"block",fontSize:13}}>
+                {customerLocation
+                   ? "موقعیت مشتری ثبت شده است"
+                   : pendingLocation
+                   ? "موقعیت برای مشتری جدید انتخاب شده است"
+                   : "موقعیت مشتری هنوز ثبت نشده"}
+              </strong>
+              <span style={{display:"block",marginTop:4,fontSize:11,color:"#64748b"}}>
+                {customerLocation
+                  ? `${customerLocation.latitude.toFixed(6)} , ${customerLocation.longitude.toFixed(6)}`
+                  : "با نقشه موقعیت فروشگاه را مشخص کنید."}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={locationSaving}
+            onClick={()=>{
+              setShowLocationPicker(true);
+            }}
+          >
+            <MapPin size={16}/>
+            {locationSaving
+              ? "در حال دریافت آدرس..."
+              : customerLocation
+              ? "ویرایش موقعیت روی نقشه"
+              : "ثبت موقعیت روی نقشه"}
+          </button>
+        </div>
+
+        {locationAddressLoading && !isNewCustomer && (
+          <small style={{display:"block",marginTop:6,color:"#0f6b43"}}>
+            در حال دریافت آدرس خودکار از روی مختصات انتخاب‌شده...
+          </small>
+        )}
+
+        {isNewCustomer && (
+          <small style={{display:"block",marginTop:6,color:"#64748b"}}>
+            می‌توانید موقعیت را همین حالا روی نقشه انتخاب کنید؛ با ذخیره مشتری، موقعیت و اطلاعات مکانی نیز ثبت می‌شوند.
+          </small>
+        )}
       </div>
 
 
-
-
       <div className="form-field">
-
-
         <label>
           ویزیتور
         </label>
 
+        <select
+          className="input"
+          disabled={!edit || visitorsLoading}
+          value={form.visitor_id}
+          onChange={e=>{
+            const visitorId=e.target.value;
+            const selectedVisitor=visitors.find(v=>v.id===visitorId);
 
-        <input
+            setForm({
+              ...form,
+              visitor_id:visitorId,
+              visitor:selectedVisitor?.full_name || ""
+            });
+          }}
+        >
+          <option value="">
+            {visitorsLoading
+              ? "در حال دریافت ویزیتورها..."
+              : "انتخاب ویزیتور"}
+          </option>
 
+          {visitors.map(visitor=>(
+            <option key={visitor.id} value={visitor.id}>
+              {visitor.full_name}
+              {visitor.phone ? ` — ${visitor.phone}` : ""}
+            </option>
+          ))}
+        </select>
 
-        className="input"
-
-
-        disabled={!edit}
-
-
-        value={form.visitor}
-
-
-        onChange={e=>
-
-
-        setForm({
-
-
-        ...form,
-
-
-        visitor:e.target.value
-
-
-        })
-
-
-        }
-
-
-        />
-
-
+        {!visitorsLoading && visitors.length===0 && (
+          <small
+            style={{
+              display:"block",
+              marginTop:6,
+              color:"#b45309"
+            }}
+          >
+            هنوز ویزیتور فعالی تعریف نشده است.
+          </small>
+        )}
       </div>
 
 
@@ -1641,25 +2137,6 @@ province:e.target.value
       </div>
 
 
-      <div className="form-field">
-        <label>
-          رابطه با مجموعه
-        </label>
-        <input
-          className="input"
-          disabled
-          value={
-            customerGroup
-              ? customerGroup.primary_customer_id === customerId
-                ? "مشتری مادر / مجموعه"
-                : `شعبه زیرمجموعه «${customerGroup.name}»`
-              : initialGroupId
-              ? "در حال اتصال به مجموعه"
-              : "مشتری مستقل"
-          }
-        />
-      </div>
-
       <div className="form-field full">
         <label>
           توضیحات
@@ -1779,7 +2256,7 @@ onClick={()=>setEdit(true)}
       </div>
     </div>
 
-    {!isNewCustomer && !customerGroup && (
+    {!isNewCustomer && !customerGroup && form.customer_type === "زنجیره‌ای" && (
       <button
         className="btn btn-primary"
         onClick={createCustomerGroup}
@@ -1789,7 +2266,7 @@ onClick={()=>setEdit(true)}
       </button>
     )}
 
-    {!isNewCustomer && customerGroup && (
+    {!isNewCustomer && customerGroup && form.customer_type === "زنجیره‌ای" && (
       <button
         className="btn btn-primary"
         onClick={addBranch}
@@ -2662,6 +3139,17 @@ onClick={()=>deleteMedia(item.id)}
 
   </>
 )}
+
+      <LeafletLocationPicker
+        open={showLocationPicker}
+        initialLocation={customerLocation ? {
+          latitude:customerLocation.latitude,
+          longitude:customerLocation.longitude
+        } : null}
+        saving={locationSaving}
+        onClose={()=>setShowLocationPicker(false)}
+        onSave={saveCustomerLocation}
+      />
 
 </AppShell>
 

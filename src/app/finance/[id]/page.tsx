@@ -339,33 +339,122 @@ function jalaliPartsToGregorianString(
   )}`;
 }
 
-function faDate(value: string | null) {
-  if (!value) return "-";
+function parseFinanceDate(value: string | null) {
+  if (!value) return null;
 
-  const { jy, jm, jd } = gregorianStringToJalali(value);
+  const clean = String(value).trim();
+  const datePart = clean.split(" ")[0];
+  const slashParts = datePart.split("/");
+
+  // تاریخ شمسی ذخیره‌شده مثل ۱۴۰۵/۰۵/۳۱
+  if (
+    slashParts.length === 3 &&
+    Number(slashParts[0]) >= 1300 &&
+    Number(slashParts[0]) <= 1500
+  ) {
+    const jy = Number(slashParts[0]);
+    const jm = Number(slashParts[1]);
+    const jd = Number(slashParts[2]);
+
+    if (
+      Number.isInteger(jy) &&
+      Number.isInteger(jm) &&
+      Number.isInteger(jd) &&
+      jm >= 1 &&
+      jm <= 12 &&
+      jd >= 1 &&
+      jd <= jalaliDaysInMonth(jy, jm)
+    ) {
+      const { gy, gm, gd } = jalaliToGregorian(jy, jm, jd);
+      return new Date(Date.UTC(gy, gm - 1, gd, 12, 0, 0));
+    }
+  }
+
+  // تاریخ میلادی/ISO مثل 2026-08-13
+  const isoDate = datePart.substring(0, 10);
+  const [gy, gm, gd] = isoDate.split("-").map(Number);
+
+  if (
+    Number.isInteger(gy) &&
+    Number.isInteger(gm) &&
+    Number.isInteger(gd) &&
+    gm >= 1 &&
+    gm <= 12 &&
+    gd >= 1 &&
+    gd <= 31
+  ) {
+    return new Date(Date.UTC(gy, gm - 1, gd, 12, 0, 0));
+  }
+
+  const parsed = new Date(clean);
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : new Date(
+        Date.UTC(
+          parsed.getFullYear(),
+          parsed.getMonth(),
+          parsed.getDate(),
+          12,
+          0,
+          0
+        )
+      );
+}
+
+function faDate(value: string | null) {
+  const date = parseFinanceDate(value);
+  if (!date) return "-";
+
+  const { jy, jm, jd } = gregorianToJalali(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate()
+  );
 
   return `${toPersianDigits(jy)}/${toPersianDigits(
     String(jm).padStart(2, "0")
   )}/${toPersianDigits(String(jd).padStart(2, "0"))}`;
 }
 
+function calculateSettlementDueDate(
+  deliveryDate: string | null,
+  settlementDays: number | null | undefined
+) {
+  const delivery = parseFinanceDate(deliveryDate);
+  const days = Number(settlementDays || 0);
+
+  if (!delivery || !Number.isFinite(days)) {
+    return null;
+  }
+
+  const due = new Date(delivery.getTime());
+  due.setUTCDate(due.getUTCDate() + Math.trunc(days));
+
+  return `${due.getUTCFullYear()}-${String(
+    due.getUTCMonth() + 1
+  ).padStart(2, "0")}-${String(due.getUTCDate()).padStart(2, "0")}`;
+}
+
+function formatWarehouseDeliveryDate(value: string | null) {
+  return faDate(value);
+}
+
+function formatSettlementDueDate(value: string | null) {
+  return faDate(value);
+}
+
 function daysUntilSettlement(value: string | null) {
-  if (!value) return null;
-
-  const raw = String(value).substring(0, 10);
-  const [year, month, day] = raw.split("-").map(Number);
-
-  if (!year || !month || !day) return null;
+  const dueDate = parseFinanceDate(value);
+  if (!dueDate) return null;
 
   const today = new Date();
   const todayStart = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 12, 0, 0)
   );
-  const dueDate = new Date(year, month - 1, day);
 
-  return Math.round((dueDate.getTime() - todayStart.getTime()) / 86400000);
+  return Math.round(
+    (dueDate.getTime() - todayStart.getTime()) / 86400000
+  );
 }
 
 function dateValueToJalali(value: string | null) {
@@ -862,11 +951,20 @@ export default function CustomerFinancePage() {
         ])
       );
 
+      const settlementDays = Number(baseCustomer?.settlement_days || 0);
+
       const ordersWithBranchName = (ordersData || []).map(
         (order: any) => ({
           ...order,
           branch_name:
             customerNameMap.get(order.customer_id) || "-",
+          // موعد تسویه واقعی:
+          // تاریخ تحویل سفارش + مدت تسویه مشتری
+          // مقدار settlement_due_date قبلی دیتابیس برای نمایش ملاک نیست.
+          settlement_due_date: calculateSettlementDueDate(
+            order.delivery_date || null,
+            settlementDays
+          ),
         })
       );
 
@@ -884,7 +982,7 @@ export default function CustomerFinancePage() {
         }))
       );
 
-      const orderRows: LedgerRow[] = (ordersData || []).map(
+      const orderRows: LedgerRow[] = (ordersWithBranchName || []).map(
         (order: any) => ({
           id: `order-${order.id}`,
           orderId: order.id,
@@ -896,6 +994,8 @@ export default function CustomerFinancePage() {
           amount: Number(order.invoice_total || 0),
           invoiceTotal: Number(order.invoice_total || 0),
           date: order.delivery_date || null,
+          // منبع «تاریخ تحویل» دقیقاً همان orders.delivery_date است
+          // که صفحه اول انبار در ستون «تاریخ تحویل سفارش» نمایش می‌دهد.
           deliveryDate: order.delivery_date || null,
           settlementDueDate:
             order.settlement_due_date || null,
@@ -1059,9 +1159,9 @@ export default function CustomerFinancePage() {
     return {
       orderNumber: unique(orderSettlements.map((row) => toPersianDigits(String(row.order_number ?? "-")))),
       branch: unique(orderSettlements.map((row) => row.branch_name || "-")),
-      deliveryDate: unique(orderSettlements.map((row) => faDate(row.delivery_date))),
+      deliveryDate: unique(orderSettlements.map((row) => formatWarehouseDeliveryDate(row.delivery_date))),
       settlementDueDate: unique(
-        orderSettlements.map((row) => faDate(row.settlement_due_date))
+        orderSettlements.map((row) => formatSettlementDueDate(row.settlement_due_date))
       ),
       invoiceTotal: unique(orderSettlements.map((row) => money(row.invoice_total))),
       paid: unique(orderSettlements.map((row) => money(row.paid))),
@@ -1095,9 +1195,9 @@ export default function CustomerFinancePage() {
         settlementFilters.orderNumber
       ) &&
       matchesSelected(row.branch_name || "-", settlementFilters.branch) &&
-      matchesSelected(faDate(row.delivery_date), settlementFilters.deliveryDate) &&
+      matchesSelected(formatWarehouseDeliveryDate(row.delivery_date), settlementFilters.deliveryDate) &&
       matchesSelected(
-        faDate(row.settlement_due_date),
+        formatSettlementDueDate(row.settlement_due_date),
         settlementFilters.settlementDueDate
       ) &&
       matchesSelected(money(row.invoice_total), settlementFilters.invoiceTotal) &&
@@ -2670,9 +2770,9 @@ export default function CustomerFinancePage() {
                         {order.branch_name || "-"}
                       </td>
                       <td style={{ padding: "10px" }}>
-                        {faDate(order.delivery_date)}
+                        {formatWarehouseDeliveryDate(order.delivery_date)}
                       </td>
-                      <td style={{ padding: "10px" }}>{faDate(order.settlement_due_date)}</td>
+                      <td style={{ padding: "10px" }}>{formatSettlementDueDate(order.settlement_due_date)}</td>
                       <td
                         style={{
                           padding: "10px",
