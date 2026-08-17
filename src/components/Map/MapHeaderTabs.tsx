@@ -45,41 +45,55 @@ type NavTab = {
 
 const navTabs: NavTab[] = [
   {
-    id: "customers",
-    title: "مشتریان",
+    id: "sales_decline",
+    title: "افت فروش",
     children: [
-      { id: "chain", title: "مشتریان زنجیره‌ای", filter: "chain" },
-      { id: "vip", title: "مشتریان VIP", filter: "vip" },
-      { id: "retail", title: "مشتریان مویرگی", filter: "retail" },
-      { id: "active", title: "مشتریان فعال", filter: "active" },
-      { id: "inactive", title: "مشتریان غیرفعال", filter: "inactive" },
-      { id: "first_purchase", title: "مشتریان خرید اولی", filter: "first_purchase" },
-      { id: "regular", title: "مشتریان دائمی", filter: "regular" },
-      { id: "lost", title: "مشتریان از دست‌رفته", filter: "lost" },
-      { id: "at_risk", title: "مشتریان در خطر ریزش", filter: "at_risk" },
-    ],
-  },
-  { id: "visitors", title: "ویزیتورها", href: "/visitors" },
-  {
-    id: "areas",
-    title: "محدوده شهرها",
-    children: [
-      {
-        id: "coverage",
-        title: "تراکم و پوشش",
-        href: "/customers/map",
-      },
-      {
-        id: "routes",
-        title: "مسیرها و ویزیت",
-        href: "/visitors/routes",
-      },
+      { id: "customer_retention", title: "نرخ حفظ مشتری" },
+      { id: "customer_churn", title: "نرخ ریزش مشتری" },
+      { id: "active_customers", title: "درصد مشتریان فعال" },
+      { id: "target_customer_coverage", title: "پوشش مشتریان هدف" },
+      { id: "repeat_purchase_rate", title: "نرخ تکرار خرید" },
+      { id: "complete_order_fulfillment", title: "درصد تأمین کامل سفارش" },
+      { id: "lost_sales", title: "فروش از دست‌رفته" },
+      { id: "key_customer_sales_trend", title: "روند فروش مشتریان کلیدی" },
+      { id: "customer_debt_delay", title: "میزان بدهی و تأخیر در تسویه مشتریان" },
+      { id: "overdue_receivables", title: "مطالبات سررسیدگذشته" },
     ],
   },
   {
-    id: "search",
-    title: "جستجو",
-    href: "/search",
+    id: "sales_growth",
+    title: "رشد فروش",
+    children: [
+      { id: "sales_per_customer", title: "فروش به ازای هر مشتری" },
+      { id: "share_of_customer_purchases", title: "سهم از خرید مشتری" },
+      { id: "items_per_order", title: "تعداد اقلام در هر سفارش" },
+      { id: "visit_to_order_conversion", title: "نرخ تبدیل ویزیت به سفارش" },
+      { id: "new_product_sales", title: "فروش محصولات جدید" },
+      { id: "new_customer_sales", title: "فروش به مشتریان جدید" },
+      { id: "existing_customer_sales_growth", title: "رشد فروش مشتریان موجود" },
+      { id: "recoverable_lost_sales", title: "فروش از دست‌رفته قابل بازیابی" },
+      { id: "sales_force_productivity", title: "بهره‌وری نیروی فروش" },
+    ],
+  },
+  {
+    id: "sales_profit",
+    title: "سود فروش",
+    children: [
+      { id: "customer_margin", title: "حاشیه سود هر مشتری" },
+      { id: "product_margin", title: "حاشیه سود هر محصول" },
+      { id: "visitor_profit", title: "سود هر ویزیتور" },
+    ],
+  },
+  {
+    id: "liquidity",
+    title: "نقدینگی",
+    children: [
+      { id: "receivables_collection_rate", title: "درصد وصول مطالبات" },
+      { id: "overdue_receivables_liquidity", title: "مطالبات سررسیدگذشته" },
+      { id: "average_collection_time", title: "میانگین زمان وصول پول" },
+      { id: "customer_account_balance", title: "مانده حساب مشتریان" },
+      { id: "cash_credit_sales_ratio", title: "نسبت فروش نقدی به اعتباری" },
+    ],
   },
 ];
 

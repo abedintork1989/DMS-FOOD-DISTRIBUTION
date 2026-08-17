@@ -12,6 +12,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { getProvinceFillColor, normalizeProvinceName } from "@/lib/provinceUtils";
+import type { MapCustomer } from "@/components/Map/mapTypes";
 
 const markerPulseStyle = `
 @keyframes customerPulse {
@@ -33,6 +34,7 @@ function createCustomerDot() {
         background:#dc2626;
         border:2px solid white;
         box-shadow:0 0 8px #dc2626;
+        animation: customerPulse 1.2s infinite;
       "></div>
     `,
     iconSize: [10, 10],
@@ -45,24 +47,66 @@ function createCustomerStar() {
     className: "",
     html: `
       <div style="
-        width:18px;
-        height:18px;
+        width:24px;
+        height:24px;
         display:flex;
         align-items:center;
         justify-content:center;
-        animation: customerPulse 1.2s infinite;
-        filter:drop-shadow(0 0 4px #d4af37);
+        animation:customerPulse 1.2s infinite;
       ">
         <span style="
-          color:#d4af37;
-          font-size:20px;
-          line-height:18px;
-          text-shadow:0 0 2px white,0 0 4px #d4af37;
+          color:  #ffe205  ;
+          font-size:10px;
+          line-height:40px;
+          font-weight:900;
+          -webkit-text-stroke:3px #0b0b0b;
+          paint-order:stroke fill;
+          text-shadow:0 0 3px rgba(6, 6, 6, 0.98),0 0 5px rgba(1, 1, 1, 0.8);
         ">★</span>
       </div>
     `,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
+
+function createCustomerVipCircle() {
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="
+        width:10px;
+        height:10px;
+        border-radius:50%;
+        background: #d46c03;
+        border:1px solid #0b0b0b;
+        box-shadow:0 0 0 2px rgba(1, 1, 1, 0.95),0 0 8px rgba(12, 12, 12, 0.75);
+        animation:customerPulse 1.2s infinite;
+        box-sizing:border-box;
+      "></div>
+    `,
     iconSize: [18, 18],
     iconAnchor: [9, 9],
+  });
+}
+
+function createCustomerRetailDot() {
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="
+        width:11px;
+        height:11px;
+        border-radius:50%;
+        background:#dc2626;
+        border:2px solid #ffffff;
+        box-shadow:0 0 0 1px rgba(15,23,42,0.15),0 0 8px rgba(220,38,38,0.75);
+        animation:customerPulse 1.2s infinite;
+        box-sizing:border-box;
+      "></div>
+    `,
+    iconSize: [11, 11],
+    iconAnchor: [5.5, 5.5],
   });
 }
 
@@ -134,19 +178,7 @@ function displayProvinceNameFa(rawName: string, normalizedName: string) {
   return PROVINCE_NAME_FA[key] || normalizedName || rawName || "نامشخص";
 }
 
-export type MapCustomer = {
-  id: string;
-  name: string;
-  phone: string | null;
-  address: string | null;
-  province: string | null;
-  visitor: string | null;
-  settlement_days: number | null;
-  latitude: number;
-  longitude: number;
-  active: boolean;
-  customer_type: string | null;
-};
+
 
 function FitIranBounds() {
   const map = useMap();
@@ -167,23 +199,34 @@ function CustomerMarkers({
   return (
     <>
       {customers.map((c) => {
-        // نوع مشتری مستقیماً از فیلد customer_type جدول customers خوانده می‌شود.
-        // فقط «زنجیره‌ای» به ستاره طلایی تبدیل می‌شود؛ بقیه همان نقطه قرمز می‌مانند.
         const customerType = String(c.customer_type ?? "")
           .normalize("NFKC")
           .trim()
           .replace(/\u200c/g, "")
-          .replace(/[\sـ]+/g, "");
+          .replace(/ي/g, "ی")
+          .replace(/ك/g, "ک")
+          .replace(/[\sـ]+/g, "")
+          .toLowerCase();
 
-        const chainType = "زنجیره‌ای"
-          .normalize("NFKC")
-          .replace(/\u200c/g, "")
-          .replace(/[\sـ]+/g, "");
+        const isChainCustomer =
+          customerType.includes("زنجیره") ||
+          customerType.includes("chain");
 
-        const icon =
-          customerType === chainType
-            ? createCustomerStar()
-            : createCustomerDot();
+        const isVipCustomer =
+          customerType === "vip" ||
+          customerType.includes("vip");
+
+        const isRetailCustomer =
+          customerType.includes("مویرگی") ||
+          customerType.includes("retail");
+
+        const icon = isChainCustomer
+          ? createCustomerStar()
+          : isVipCustomer
+          ? createCustomerVipCircle()
+          : isRetailCustomer
+          ? createCustomerRetailDot()
+          : createCustomerDot();
 
         return (
           <Marker
