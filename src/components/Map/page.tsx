@@ -11,7 +11,7 @@ import {
   normalizeProvinceName,
   settlementLabel,
 } from "@/lib/provinceUtils";
-import type { MapCustomer } from "@/components/Map/CustomerMapCanvas";
+import type { MapCustomer } from "@/components/Map/mapTypes";
 import MapHeaderTabs, {
   HeaderTab,
   CustomerMapFilter,
