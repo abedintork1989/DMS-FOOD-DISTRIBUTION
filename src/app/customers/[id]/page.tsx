@@ -888,6 +888,34 @@ async function createCustomerGroup(){
   await loadCustomerGroup();
 }
 
+async function deleteBranch(branchId:string, branchName:string){
+  if(!confirm(`شعبه «${branchName}» از مجموعه جدا شود؟\n\nاطلاعات فروش، سفارش‌ها و تاریخچه آن حفظ خواهد شد.`)){
+    return;
+  }
+
+  try{
+    // حذف واقعی انجام نمی‌شود.
+    // شعبه فقط مستقل می‌شود تا تاریخچه سفارش‌ها و فروش حفظ شود.
+    const { error } = await supabase
+      .from("customers")
+      .update({
+        customer_group_id: null,
+        customer_type: "مویرگی"
+      })
+      .eq("id", branchId);
+
+    if(error){
+      throw error;
+    }
+
+    alert("شعبه با موفقیت از مجموعه جدا شد و اطلاعات آن حفظ گردید.");
+    await loadCustomerGroup();
+  }catch(error:any){
+    console.error("DETACH BRANCH ERROR:", error);
+    alert("خطا در جدا کردن شعبه:\n" + (error?.message || "خطای نامشخص"));
+  }
+}
+
 function addBranch(){
   if((form.customer_type || "مویرگی") !== "زنجیره‌ای"){
     alert("فقط مشتری از نوع «زنجیره‌ای» می‌تواند شعبه زیرمجموعه داشته باشد.");
@@ -1155,6 +1183,43 @@ const selectedCustomerType =
     ? "زنجیره‌ای"
     : (form.customer_type || "مویرگی");
 
+  // اگر مشتری مادر زنجیره‌ای به VIP یا مویرگی تغییر کند،
+  // شعبه‌ها حذف نمی‌شوند و فقط مستقل می‌شوند.
+  const leavingChain =
+    customerGroup &&
+    customerGroup.primary_customer_id === customerId &&
+    selectedCustomerType !== "زنجیره‌ای";
+
+  if (leavingChain) {
+    const { error: detachBranchesError } = await supabase
+      .from("customers")
+      .update({
+        customer_group_id: null,
+      })
+      .eq("customer_group_id", customerGroup.id)
+      .neq("id", customerId);
+
+    if (detachBranchesError) {
+      alert(
+        "خطا در جدا کردن شعبه‌ها از مجموعه:\n" +
+        detachBranchesError.message
+      );
+      return;
+    }
+
+    await supabase
+      .from("customers")
+      .update({
+        customer_group_id: null,
+      })
+      .eq("id", customerId);
+
+    await supabase
+      .from("customer_groups")
+      .delete()
+      .eq("id", customerGroup.id);
+  }
+
   const {error}=await supabase
     .from("customers")
     .update({
@@ -1185,7 +1250,8 @@ const selectedCustomerType =
   // همان مجموعه نیز دقیقاً یکسان می‌شود.
   if (
     customerGroup &&
-    customerGroup.primary_customer_id === customerId
+    customerGroup.primary_customer_id === customerId &&
+    selectedCustomerType === "زنجیره‌ای"
   ) {
     const { error: branchTypeError } = await supabase
       .from("customers")
@@ -2377,12 +2443,21 @@ onClick={()=>setEdit(true)}
                     <td>{branch.visitor || "-"}</td>
                     <td>{branch.responsible || "-"}</td>
                     <td>
+                      <div style={{display:"flex",gap:8}}>
                       <button
                         className="btn btn-secondary btn-small"
                         onClick={() => openBranch(branch.id)}
                       >
                         مشاهده شعبه
                       </button>
+
+                      <button
+                        className="btn btn-danger btn-small"
+                        onClick={() => deleteBranch(branch.id, branch.name)}
+                      >
+                        حذف شعبه
+                      </button>
+                      </div>
                     </td>
                   </tr>
                 ))

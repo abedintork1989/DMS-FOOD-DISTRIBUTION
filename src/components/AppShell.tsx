@@ -1,10 +1,6 @@
-// components/AppShell.tsx
-
 "use client";
 
-
-import Header from "@/components/Header";
-
+import Sidebar from "@/components/Sidebar/Sidebar";
 
 
 export default function AppShell({
@@ -19,8 +15,7 @@ export default function AppShell({
     <div className="app-root dms-app-root">
 
 
-      <Header />
-
+      <Sidebar />
 
 
       <main className="app-content dms-content">

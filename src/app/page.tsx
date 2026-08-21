@@ -3,16 +3,7 @@
 import { FormEvent, useState } from "react";
 import { Eye, EyeOff, LockKeyhole, User } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Vazirmatn } from "next/font/google";
 import { supabase } from "@/lib/supabase";
-
-// فونت اصلی رابط کاربری — Vazirmatn: خوانا، مدرن و پرکاربردترین فونت فارسی در طراحی وب امروز
-const vazir = Vazirmatn({
-  subsets: ["arabic"],
-  weight: ["400", "500", "600", "700", "800"],
-  variable: "--font-vazir",
-  display: "swap",
-});
 
 type LoginUser = {
   username: "A.Tork" | "A.Najari";
@@ -111,7 +102,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className={`naser-login-page ${vazir.variable}`}>
+    <main className={`naser-login-page `}>
       {/* پس‌زمینه را با فایل خودتان جایگزین کنید: public/naser-login-bg.png */}
       <div className="naser-login-overlay" />
 

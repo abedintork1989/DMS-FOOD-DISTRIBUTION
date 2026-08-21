@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import * as XLSX from "xlsx";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { openSalesOrderDocument } from "@/lib/orderDocuments";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
 import { ArrowRight, Search, ShoppingCart } from "lucide-react";
@@ -726,6 +727,8 @@ export default function NewOrderPage() {
         setSaving(false);
         return;
       }
+
+      await openSalesOrderDocument(order.id, { invoiceTotal: orderTotal });
 
       alert("سفارش با موفقیت ثبت شد.");
       router.push("/orders");

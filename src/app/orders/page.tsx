@@ -11,6 +11,7 @@ import {
   X,
   Pencil,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 
 import AppShell from "@/components/AppShell";
@@ -192,12 +193,57 @@ function statusInfo(status: string) {
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  type OrderSnapshot = {
+    id: string;
+    order_id: string;
+    invoice_total?: number | null;
+    send_date?: string | null;
+    snapshot_type?: string | null;
+    created_at?: string | null;
+  };
+
+  const [orderSnapshots, setOrderSnapshots] = useState<OrderSnapshot[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [discounts, setDiscounts] = useState<CustomerDiscount[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  /* ------------------------------------------------ */
+  /* فیلتر و جستجوی ستونی لیست سفارشات */
+  /* ------------------------------------------------ */
+
+  type OrderFilterKey =
+    | "customer"
+    | "branch"
+    | "province"
+    | "visitor"
+    | "status"
+    | "createdAt"
+    | "sendDate"
+    | "invoiceTotal";
+
+  const [orderFilterSelections, setOrderFilterSelections] = useState<
+    Record<OrderFilterKey, string[]>
+  >({
+    customer: [],
+    branch: [],
+    province: [],
+    visitor: [],
+    status: [],
+    createdAt: [],
+    sendDate: [],
+    invoiceTotal: [],
+  });
+
+  const [openOrderFilter, setOpenOrderFilter] =
+    useState<OrderFilterKey | null>(null);
+  const [orderFilterSearch, setOrderFilterSearch] = useState("");
+  const [orderSortKey, setOrderSortKey] = useState<OrderFilterKey | null>(null);
+  const [orderSortDirection, setOrderSortDirection] = useState<"asc" | "desc">(
+    "asc"
+  );
 
   const [modal, setModal] = useState(false);
   const [detail, setDetail] = useState<Order | null>(null);
@@ -231,9 +277,26 @@ export default function OrdersPage() {
       loadCustomers(),
       loadProducts(),
       loadOrders(),
+      loadOrderSnapshots(),
     ]);
 
     setLoading(false);
+  }
+
+  async function loadOrderSnapshots() {
+    const { data, error } = await supabase
+      .from("order_snapshots")
+      .select("id,order_id,invoice_total,send_date,snapshot_type,created_at")
+      .eq("snapshot_type", "official_invoice")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("ORDER SNAPSHOTS LOAD WARNING:", error.message);
+      setOrderSnapshots([]);
+      return;
+    }
+
+    setOrderSnapshots((data || []) as OrderSnapshot[]);
   }
 
   async function loadCustomers() {
@@ -875,102 +938,280 @@ export default function OrdersPage() {
     await loadOrders();
   }
   /* ------------------------------------------------ */
+  /* ردیف‌های نمایشی جدول */
+  /*
+     صفحه سفارشات فقط سند «سفارش فروش» هر سفارش را نشان می‌دهد
+     (یک ردیف به‌ازای هر سفارش، با دیتای زنده و وضعیت واقعی
+     سفارش — از جمله تایید‌شده/تحویل‌شده). سند «فاکتور فروش»
+     همان سفارش در صفحه انبار دیده می‌شود.
+  ------------------------------------------------ */
+
+  type DocumentRow = {
+    id: string;
+    order: Order;
+    docType: string;
+    invoiceTotal: number;
+    sendDate: string | null;
+  };
+
+  const documentRows: DocumentRow[] = useMemo(() => {
+    // از لحظه اولین تأیید، صفحه سفارشات باید فقط از نسخه رسمی فاکتور
+    // بخواند. این Snapshot مستقل از تغییرات انبار است.
+    const snapshotByOrder = new Map<string, OrderSnapshot>();
+
+    for (const snapshot of orderSnapshots) {
+      if (!snapshotByOrder.has(snapshot.order_id)) {
+        snapshotByOrder.set(snapshot.order_id, snapshot);
+      }
+    }
+
+    return orders.map((order) => {
+      const frozenSnapshot =
+        order.status !== "pending"
+          ? snapshotByOrder.get(order.id)
+          : undefined;
+
+      return {
+        id: order.id,
+        order,
+        docType: "سفارش فروش",
+        invoiceTotal: frozenSnapshot
+          ? Number(frozenSnapshot.invoice_total ?? 0)
+          : Number(order.invoice_total || 0),
+        sendDate: frozenSnapshot
+          ? frozenSnapshot.send_date || null
+          : order.send_date || null,
+      };
+    });
+  }, [orders, orderSnapshots]);
+
+  /* ------------------------------------------------ */
   /* ستون‌های جدول سفارشات با فیلتر و مرتب‌سازی */
   /* ------------------------------------------------ */
 
-  function orderRowClass(row: Order) {
-    switch (row.status) {
-      case "pending":
-        return "order-row-pending";
-      case "approved":
-        return "order-row-approved";
-      case "delivered":
-        return "order-row-delivered";
-      default:
-        return "";
+  const orderFilterLabels: Record<OrderFilterKey, string> = {
+    customer: "مشتری",
+    branch: "شعبه",
+    province: "استان",
+    visitor: "ویزیتور",
+    createdAt: "تاریخ ثبت سفارش",
+    sendDate: "تاریخ ارسال سفارش",
+    invoiceTotal: "مبلغ کل",
+    status: "وضعیت",
+  };
+
+  function getOrderFilterValue(row: DocumentRow, key: OrderFilterKey) {
+    const order = row.order;
+
+    if (key === "customer") {
+      return (
+        order.customers?.parent_name ||
+        order.customers?.name ||
+        order.customer_name ||
+        ""
+      );
     }
+    if (key === "branch") return order.branch_name || "";
+    if (key === "province") return order.customers?.province || "";
+    if (key === "visitor") return order.customers?.visitor || order.visitor || "";
+    if (key === "status") {
+      const hasOfficialSnapshot = orderSnapshots.some(
+        (snapshot) =>
+          snapshot.order_id === order.id &&
+          snapshot.snapshot_type === "official_invoice"
+      );
+
+      return statusInfo(
+        hasOfficialSnapshot && order.status === "delivered"
+          ? "approved"
+          : order.status
+      ).label;
+    }
+    if (key === "createdAt") return formatDate(order.created_at);
+    if (key === "sendDate") return row.sendDate ? formatDate(row.sendDate) : "";
+    return money(row.invoiceTotal || 0);
   }
 
-  const orderTableColumns: DataTableColumn<Order>[] = [
+  function getUniqueOrderFilterValues(key: OrderFilterKey) {
+    return Array.from(
+      new Set(
+        documentRows
+          .map((row) => getOrderFilterValue(row, key))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fa"));
+  }
+
+  function toggleOrderFilterValue(key: OrderFilterKey, value: string) {
+    setOrderFilterSelections((current) => {
+      const selected = current[key];
+      const next = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+
+      return {
+        ...current,
+        [key]: next,
+      };
+    });
+  }
+
+  function clearAllOrderFilters() {
+    setOrderFilterSelections({
+      customer: [],
+      branch: [],
+      province: [],
+      visitor: [],
+      status: [],
+      createdAt: [],
+      sendDate: [],
+      invoiceTotal: [],
+    });
+    setOpenOrderFilter(null);
+    setOrderFilterSearch("");
+    setOrderSortKey(null);
+  }
+
+  function sortOrdersByFilter(key: OrderFilterKey, direction: "asc" | "desc") {
+    setOrderSortKey(key);
+    setOrderSortDirection(direction);
+  }
+
+  const filteredDocumentRows = [...documentRows]
+    .filter((row) =>
+      (Object.keys(orderFilterSelections) as OrderFilterKey[]).every((key) => {
+        const selected = orderFilterSelections[key];
+        if (selected.length === 0) return true;
+        return selected.includes(getOrderFilterValue(row, key));
+      })
+    )
+    .sort((a, b) => {
+      if (!orderSortKey) return 0;
+
+      const av = getOrderFilterValue(a, orderSortKey);
+      const bv = getOrderFilterValue(b, orderSortKey);
+
+      const result = av.localeCompare(bv, "fa", { numeric: true });
+      return orderSortDirection === "asc" ? result : -result;
+    });
+
+  const docTypeStyle: Record<string, { bg: string; color: string }> = {
+    "سفارش فروش": { bg: "#eff6ff", color: "#1d4ed8" },
+    "فاکتور فروش": { bg: "#ecfdf5", color: "#047857" },
+  };
+
+  const orderTableColumns: DataTableColumn<DocumentRow>[] = [
     {
       key: "order_number",
       title: "کد سفارش",
       width: 90,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => row.order_number || "-",
+      sortable: false,
+      accessor: (row) => row.order.order_number || "-",
       render: (value) => (
         <strong>{String(value ?? "-")}</strong>
       ),
     },
     {
+      key: "doc_type",
+      title: "نوع سند",
+      width: 100,
+      filterable: false,
+      searchable: true,
+      sortable: false,
+      accessor: (row) => row.docType,
+      render: (value) => {
+        const label = String(value ?? "");
+        const style = docTypeStyle[label] || {
+          bg: "#f1f5f9",
+          color: "#475569",
+        };
+
+        return (
+          <span
+            style={{
+              display: "inline-flex",
+              padding: "5px 10px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              background: style.bg,
+              color: style.color,
+            }}
+          >
+            {label}
+          </span>
+        );
+      },
+    },
+    {
       key: "customer",
       title: "مشتری",
       width: 90,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
+      sortable: false,
       accessor: (row) =>
-        row.customers?.parent_name ||
-        row.customers?.name ||
-        row.customer_name ||
+        row.order.customers?.parent_name ||
+        row.order.customers?.name ||
+        row.order.customer_name ||
         "-",
     },
     {
       key: "branch",
       title: "شعبه",
       width: 100,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => row.branch_name || "-",
+      sortable: false,
+      accessor: (row) => row.order.branch_name || "-",
     },
     {
       key: "province",
       title: "استان",
       width: 85,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => row.customers?.province || "-",
+      sortable: false,
+      accessor: (row) => row.order.customers?.province || "-",
     },
     {
       key: "visitor",
       title: "ویزیتور",
       width: 100,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => row.customers?.visitor || row.visitor || "-",
+      sortable: false,
+      accessor: (row) => row.order.customers?.visitor || row.order.visitor || "-",
     },
     {
       key: "created_at",
       title: "تاریخ ثبت سفارش",
       width: 100,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => formatDate(row.created_at),
+      sortable: false,
+      accessor: (row) => formatDate(row.order.created_at),
     },
     {
       key: "send_date",
       title: "تاریخ ارسال سفارش",
       width: 110,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => row.send_date ? formatDate(row.send_date) : "-",
+      sortable: false,
+      accessor: (row) => row.sendDate ? formatDate(row.sendDate) : "-",
     },
     {
       key: "invoice_total",
       title: "مبلغ کل",
       width: 90,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
+      sortable: false,
       type: "number",
-      accessor: (row) => Number(row.invoice_total || 0),
+      accessor: (row) => row.invoiceTotal,
       render: (value) => (
         <strong>{money(Number(value || 0))}</strong>
       ),
@@ -979,12 +1220,34 @@ export default function OrdersPage() {
       key: "status",
       title: "وضعیت",
       width: 100,
-      filterable: true,
+      filterable: false,
       searchable: true,
-      sortable: true,
-      accessor: (row) => statusInfo(row.status).label,
+      sortable: false,
+      accessor: (row) => {
+        const hasOfficialSnapshot = orderSnapshots.some(
+          (snapshot) =>
+            snapshot.order_id === row.order.id &&
+            snapshot.snapshot_type === "official_invoice"
+        );
+
+        return statusInfo(
+          hasOfficialSnapshot && row.order.status === "delivered"
+            ? "approved"
+            : row.order.status
+        ).label;
+      },
       render: (_value, row) => {
-        const status = statusInfo(row.status);
+        const hasOfficialSnapshot = orderSnapshots.some(
+          (snapshot) =>
+            snapshot.order_id === row.order.id &&
+            snapshot.snapshot_type === "official_invoice"
+        );
+
+        const status = statusInfo(
+          hasOfficialSnapshot && row.order.status === "delivered"
+            ? "approved"
+            : row.order.status
+        );
 
         return (
           <span className={`badge ${status.className}`}>
@@ -1001,16 +1264,27 @@ export default function OrdersPage() {
       searchable: false,
       sortable: false,
       accessor: () => "",
-      render: (_value, row) => (
-        <button
-          type="button"
-          className="btn btn-secondary btn-small"
-          onClick={() => router.push(`/orders/${row.id}`)}
-        >
-          <Eye size={15} />
-          مشاهده
-        </button>
-      ),
+      render: (_value, row) => {
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => router.push(`/orders/${row.order.id}`)}
+              title="مشاهده سفارش"
+              style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
+            >
+              <Eye size={15} />
+            </button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -1042,17 +1316,14 @@ export default function OrdersPage() {
           overflow-x: hidden !important;
         }
 
-        .order-row-pending td {
-          background: #fffbe8 !important;
+        .orders-page-compact th,
+        .orders-page-compact td {
+          text-align: center !important;
         }
-        .order-row-approved td {
-          background: #fed7aa !important;
-        }
-        .order-row-delivered td {
-          background: #dcfce7 !important;
-        }
-        .order-row-approved:hover td {
-          background: #fdba74 !important;
+
+        .orders-page-compact .data-table-header {
+          width: 100% !important;
+          justify-content: center !important;
         }
       `}</style>
       <AppShell>
@@ -1062,14 +1333,257 @@ export default function OrdersPage() {
         action={
 
           <button
-  className="btn btn-primary"
+  className="btn btn-primary btn-small"
   onClick={()=>router.push("/orders/new")}
 >
-  <Plus size={17} />
+  <Plus size={12} />
   ثبت سفارش جدید
 </button>
         }
       />
+
+      {/* نوار فیلتر مستقل از جدول */}
+      <div
+        dir="rtl"
+        style={{
+          width: "100%",
+          marginBottom: 12,
+          marginTop: -24,
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "78%",
+            display: "flex",
+            alignItems: "stretch",
+            direction: "rtl",
+            background: "#f2f4f3",
+            border: "1px solid #cfd6d2",
+            borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(15,23,42,0.06)",
+            overflow: "visible",
+          }}
+        >
+          {(Object.keys(orderFilterLabels) as OrderFilterKey[]).map((key) => {
+            const isOpen = openOrderFilter === key;
+            const selected = orderFilterSelections[key];
+
+            const values = getUniqueOrderFilterValues(key).filter((value) =>
+              value.toLowerCase().includes(orderFilterSearch.toLowerCase())
+            );
+
+            return (
+              <div
+                key={key}
+                style={{
+                  position: "relative",
+                  flex: "1 1 0",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenOrderFilter((current) => (current === key ? null : key));
+                    setOrderFilterSearch("");
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    border: "0",
+                    borderLeft: "1px solid #cfd6d2",
+                    borderRadius: 0,
+                    background: selected.length ? "#149b5c" : "#f2f4f3",
+                    color: selected.length ? "#fff" : "#1f2937",
+                    fontWeight: selected.length ? 800 : 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    padding: "0 10px",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selected.length
+                      ? `${orderFilterLabels[key]} (${selected.length})`
+                      : orderFilterLabels[key]}
+                  </span>
+
+                  <span style={{ fontSize: 10 }}>
+                    {isOpen ? "▲" : "▼"}
+                  </span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 4px)",
+                      width: 300,
+                      zIndex: 10000,
+                      background: "#fff",
+                      border: "1px solid #cfd6d2",
+                      borderRadius: 8,
+                      boxShadow: "0 14px 30px rgba(15,23,42,.14)",
+                      padding: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 6,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortOrdersByFilter(key, "asc")}
+                      >
+                        مرتب‌سازی صعودی
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortOrdersByFilter(key, "desc")}
+                      >
+                        مرتب‌سازی نزولی
+                      </button>
+                    </div>
+
+                    <input
+                      className="input"
+                      placeholder={`جستجو در ${orderFilterLabels[key]}...`}
+                      value={orderFilterSearch}
+                      onChange={(e) => setOrderFilterSearch(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span>انتخاب چند مقدار</span>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#0f6b43",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setOrderFilterSelections((current) => ({
+                              ...current,
+                              [key]: [...getUniqueOrderFilterValues(key)],
+                            }))
+                          }
+                        >
+                          انتخاب همه
+                        </button>
+
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setOrderFilterSelections((current) => ({
+                              ...current,
+                              [key]: [],
+                            }))
+                          }
+                        >
+                          پاک‌کردن
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {values.map((value) => (
+                        <label
+                          key={value}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "7px 4px",
+                            cursor: "pointer",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(value)}
+                            onChange={() => toggleOrderFilterValue(key, value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))}
+
+                      {values.length === 0 && (
+                        <div
+                          style={{
+                            padding: 12,
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          مقداری پیدا نشد
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={clearAllOrderFilters}
+            title="حذف همه فیلترها"
+            style={{
+              flex: "0 0 42px",
+              height: 42,
+              border: "0",
+              background: "#dc2626",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 0,
+            }}
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+      </div>
 
       {/* لیست سفارشات */}
 
@@ -1095,10 +1609,9 @@ export default function OrdersPage() {
           </div>
         ) : (
           <DataTable
-            data={orders}
+            data={filteredDocumentRows}
             columns={orderTableColumns}
-            rowKey={(order) => order.id}
-            rowClassName={orderRowClass}
+            rowKey={(row) => row.id}
             pageSize={0}
             emptyText="سفارشی پیدا نشد."
           />

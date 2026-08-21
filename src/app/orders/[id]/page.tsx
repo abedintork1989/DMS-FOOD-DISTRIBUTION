@@ -7,6 +7,7 @@ import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { supabase } from "@/lib/supabase";
+import { approveOrderDocuments, closeOpenDocumentsForOrder } from "@/lib/orderDocuments";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
@@ -222,7 +223,7 @@ export default function OrderDetailPage() {
 
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
-        .select(`*, customers(name, visitor, province, customer_group_id)`)
+        .select(`*, customers(name, visitor, province, customer_group_id, default_discount_percent)`)
         .eq("id", id)
         .single();
 
@@ -280,19 +281,43 @@ export default function OrderDetailPage() {
         toPersianDateValue(orderData.send_date)
       );
 
-      if (orderData.customer_id) {
-        const { data: discountData, error: discountError } = await supabase
-          .from("customer_group_discounts")
-          .select("category,discount_percent")
-          .eq("customer_id", orderData.customer_id);
+      let discountCustomerId = orderData.customer_id;
 
-        if (discountError) {
-          console.log("DISCOUNT ERROR:", discountError);
-          setDiscounts([]);
-        } else {
-          setDiscounts(discountData || []);
-        }
-      }
+// اگر سفارش برای یکی از شعبه‌های مجموعه است
+// تخفیف باید از مشتری مادر خوانده شود
+if (orderData.customers?.customer_group_id) {
+  const { data: groupRow, error: groupError } =
+    await supabase
+      .from("customer_groups")
+      .select("primary_customer_id")
+      .eq(
+        "id",
+        orderData.customers.customer_group_id
+      )
+      .maybeSingle();
+
+  if (!groupError && groupRow?.primary_customer_id) {
+    discountCustomerId = groupRow.primary_customer_id;
+  }
+}
+
+if (discountCustomerId) {
+  const { data: discountData, error: discountError } =
+    await supabase
+      .from("customer_group_discounts")
+      .select("category,discount_percent")
+      .eq(
+        "customer_id",
+        discountCustomerId
+      );
+
+  if (discountError) {
+    console.log("DISCOUNT ERROR:", discountError);
+    setDiscounts([]);
+  } else {
+    setDiscounts(discountData || []);
+  }
+}
     } catch (error) {
       console.log("LOAD ORDER ERROR:", error);
     }
@@ -420,13 +445,34 @@ export default function OrderDetailPage() {
   }
 
   function getDiscountForCategory(category: string | null | undefined) {
-    // تخفیف کالای جدید را از همان تخفیف ثبت‌شده برای کالاهای فعلی سفارش می‌گیریم.
-    // اگر در سفارش تخفیف ذخیره نشده باشد، صفر در نظر گرفته می‌شود.
+    const normalize = (value: any) =>
+      String(value || "")
+        .trim()
+        .replace(/\s+/g, "")
+        .toLowerCase();
+
+    const targetCategory = normalize(category);
+
     const existing = editedItems.find(
       (item: any) =>
-        (item.products?.category || "").trim() === (category || "").trim()
+        normalize(item.products?.category || item.category) === targetCategory &&
+        item.discount_percent !== null &&
+        item.discount_percent !== undefined
     );
-    return Number(existing?.discount_percent || 0);
+
+    if (existing) {
+      return Number(existing.discount_percent || 0);
+    }
+
+    const categoryDiscount = discounts.find(
+      (row: any) => normalize(row.category) === targetCategory
+    );
+
+    if (categoryDiscount?.discount_percent !== null && categoryDiscount?.discount_percent !== undefined) {
+      return Number(categoryDiscount.discount_percent || 0);
+    }
+
+    return Number(order?.customers?.default_discount_percent || 0);
   }
 
   // انتخاب یا لغو انتخاب یک کالا
@@ -879,6 +925,8 @@ export default function OrderDetailPage() {
         return;
       }
 
+      await closeOpenDocumentsForOrder(id);
+
       setIsEditing(false);
       setShowAddProduct(false);
       setSelectedProductIds({});
@@ -1109,6 +1157,11 @@ export default function OrderDetailPage() {
                 total,
               final_price:
                 finalPrice,
+              // انتقال مقدار تایید شده به انبار در لحظه تایید سفارش
+              delivery_cartons:
+                finalOrderQuantity,
+              delivery_units:
+                finalOrderQuantity * cartonSize,
             })
             .eq("id", item.id);
 
@@ -1234,6 +1287,11 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
               finalPrice,
             final_price:
               finalPrice,
+            // مقدار اولیه‌ای که انبار باید دریافت کند
+            delivery_cartons:
+              finalOrderQuantity,
+            delivery_units:
+              finalOrderQuantity * cartonSize,
           };
         });
 
@@ -1298,24 +1356,79 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           0
         );
 
+      const gregorianSendDate = sendDate
+        ? (() => {
+            const parts = sendDate.split("/");
+            if (parts.length !== 3) return null;
+
+            return jalaliToGregorian(
+              Number(parts[0]),
+              Number(parts[1]),
+              Number(parts[2])
+            );
+          })()
+        : null;
+
+      // =====================================================
+      // ساخت نسخه رسمی فاکتور (فقط اولین تأیید)
+      // Snapshot بعد از تأیید دیگر تغییر نمی‌کند.
+      // =====================================================
+      const { data: existingSnapshot, error: snapshotCheckError } =
+        await supabase
+          .from("order_snapshots")
+          .select("id")
+          .eq("order_id", id)
+          .maybeSingle();
+
+      if (snapshotCheckError) {
+        console.log("SNAPSHOT CHECK ERROR:", snapshotCheckError);
+        alert(`خطا در بررسی نسخه فریز سفارش: ${snapshotCheckError.message}`);
+        setSaving(false);
+        return;
+      }
+
+      if (!existingSnapshot) {
+        const snapshotItems = itemsToSave.map((item: any) => ({
+          product_id: item.product_id,
+          product_name: item.products?.name || "-",
+          quantity: Number(item.quantity || 0),
+          final_order_quantity: Number(item.final_order_quantity || 0),
+          consumer_price: Number(item.consumer_price || 0),
+          discount_percent: Number(item.discount_percent || 0),
+          final_price: Number(item.final_price || 0),
+          total_purchase_price: Number(item.total_purchase_price || 0),
+        }));
+
+        const { error: snapshotInsertError } =
+          await supabase
+            .from("order_snapshots")
+            .insert({
+              order_id: id,
+              customer_id: order.customer_id || null,
+              customer_name: order.customers?.name || null,
+              visitor: order.customers?.visitor || null,
+              items: snapshotItems,
+              invoice_total: grandTotal,
+              send_date: gregorianSendDate,
+              snapshot_type: "official_invoice",
+              approved_by: session.user.id,
+            });
+
+        if (snapshotInsertError) {
+          console.log("SNAPSHOT INSERT ERROR:", snapshotInsertError);
+          alert(`خطا در ساخت نسخه رسمی فاکتور: ${snapshotInsertError.message}`);
+          setSaving(false);
+          return;
+        }
+      }
+
       const { error: orderUpdateError } =
         await supabase
           .from("orders")
           .update({
             status: "approved",
             invoice_total: grandTotal,
-            send_date: sendDate
-              ? (() => {
-                  const parts = sendDate.split("/");
-                  if (parts.length !== 3) return null;
-
-                  return jalaliToGregorian(
-                    Number(parts[0]),
-                    Number(parts[1]),
-                    Number(parts[2])
-                  );
-                })()
-              : null,
+            send_date: gregorianSendDate,
             warehouse_send_date: null,
           })
           .eq("id", id);
@@ -1333,6 +1446,11 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
         setSaving(false);
         return;
       }
+
+      await approveOrderDocuments(id, {
+        invoiceTotal: grandTotal,
+        sendDate: gregorianSendDate,
+      });
 
       const {
         data: savedOrder,

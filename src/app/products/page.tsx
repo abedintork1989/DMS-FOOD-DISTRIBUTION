@@ -15,6 +15,7 @@ import {
   UploadCloud,
   CheckCircle2,
   AlertCircle,
+  RotateCcw,
 } from "lucide-react";
 
 import AppShell from "@/components/AppShell";
@@ -163,6 +164,28 @@ export default function ProductsPage() {
 
   const [loading, setLoading] =
     useState(true);
+
+  /* =======================================================
+     فیلتر و جستجوی ستونی
+  ======================================================= */
+
+  type FilterKey =
+    | "name"
+    | "category"
+    | "barcode"
+    | "inventory";
+
+  const [filterSelections, setFilterSelections] = useState<Record<FilterKey, string[]>>({
+    name: [],
+    category: [],
+    barcode: [],
+    inventory: [],
+  });
+
+  const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [sortKey, setSortKey] = useState<FilterKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   /* =======================================================
      Modal ثبت / ویرایش
@@ -1079,6 +1102,83 @@ function exportProductsExcel(){
   }
 
   /* =======================================================
+     فیلتر و مرتب‌سازی ستونی
+  ======================================================= */
+
+  const filterLabels: Record<FilterKey, string> = {
+    name: "نام کالا",
+    category: "گروه کالا",
+    barcode: "بارکد",
+    inventory: "موجودی",
+  };
+
+  function getFilterValue(product: Product, key: FilterKey) {
+    if (key === "name") return product.name || "";
+    if (key === "category") return product.category || "";
+    if (key === "barcode") return product.barcode || "";
+    return numberFa(product.inventory);
+  }
+
+  function getUniqueFilterValues(key: FilterKey) {
+    return Array.from(
+      new Set(
+        products
+          .map((product) => getFilterValue(product, key))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fa"));
+  }
+
+  function toggleFilterValue(key: FilterKey, value: string) {
+    setFilterSelections((current) => {
+      const selected = current[key];
+      const next = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+
+      return {
+        ...current,
+        [key]: next,
+      };
+    });
+  }
+
+  function clearAllFilters() {
+    setFilterSelections({
+      name: [],
+      category: [],
+      barcode: [],
+      inventory: [],
+    });
+    setOpenFilter(null);
+    setFilterSearch("");
+    setSortKey(null);
+  }
+
+  function sortByFilter(key: FilterKey, direction: "asc" | "desc") {
+    setSortKey(key);
+    setSortDirection(direction);
+  }
+
+  const filteredProducts = [...products]
+    .filter((product) =>
+      (Object.keys(filterSelections) as FilterKey[]).every((key) => {
+        const selected = filterSelections[key];
+        if (selected.length === 0) return true;
+        return selected.includes(getFilterValue(product, key));
+      })
+    )
+    .sort((a, b) => {
+      if (!sortKey) return 0;
+
+      const av = getFilterValue(a, sortKey);
+      const bv = getFilterValue(b, sortKey);
+
+      const result = av.localeCompare(bv, "fa", { numeric: true });
+      return sortDirection === "asc" ? result : -result;
+    });
+
+  /* =======================================================
      Render
   ======================================================= */
 
@@ -1096,7 +1196,7 @@ function exportProductsExcel(){
           <div
             style={{
               display: "flex",
-              gap: 8,
+              gap: 14,
               flexWrap: "wrap",
             }}
           >
@@ -1104,30 +1204,32 @@ function exportProductsExcel(){
 
 <button
 
-className="btn btn-success"
+className="btn btn-success btn-small"
 
 onClick={exportProductsExcel}
+
+title="خروجی اکسل کالاها"
+
+style={{ width: 38, height: 38, padding: 0, justifyContent: "center" }}
 
 >
 
 <Download size={17}/>
 
-خروجی اکسل کالاها
-
 </button>
             {/* ورود گروهی */}
 
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-small"
               onClick={() =>
                 setBulkModal(true)
               }
+              title="ورود گروهی با اکسل"
+              style={{ width: 38, height: 38, padding: 0, justifyContent: "center" }}
             >
               <FileSpreadsheet
                 size={17}
               />
-
-              ورود گروهی با اکسل
             </button>
 
             {/* کالای جدید */}
@@ -1149,6 +1251,249 @@ onClick={exportProductsExcel}
         }
       />
 
+      {/* نوار فیلتر مستقل از جدول */}
+      <div
+        dir="rtl"
+        style={{
+          width: "100%",
+          marginBottom: 12,
+          marginTop: -18,
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "50%",
+            display: "flex",
+            alignItems: "stretch",
+            direction: "rtl",
+            background: "#f2f4f3",
+            border: "1px solid #cfd6d2",
+            borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(15,23,42,0.06)",
+            overflow: "visible",
+          }}
+        >
+          {(Object.keys(filterLabels) as FilterKey[]).map((key) => {
+            const isOpen = openFilter === key;
+            const selected = filterSelections[key];
+
+            const values = getUniqueFilterValues(key).filter((value) =>
+              value.toLowerCase().includes(filterSearch.toLowerCase())
+            );
+
+            return (
+              <div
+                key={key}
+                style={{
+                  position: "relative",
+                  flex: "1 1 0",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenFilter((current) => (current === key ? null : key));
+                    setFilterSearch("");
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    border: "0",
+                    borderLeft: "1px solid #cfd6d2",
+                    borderRadius: 0,
+                    background: selected.length ? "#149b5c" : "#f2f4f3",
+                    color: selected.length ? "#fff" : "#1f2937",
+                    fontWeight: selected.length ? 800 : 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    padding: "0 10px",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selected.length
+                      ? `${filterLabels[key]} (${selected.length})`
+                      : filterLabels[key]}
+                  </span>
+
+                  <span style={{ fontSize: 10 }}>
+                    {isOpen ? "▲" : "▼"}
+                  </span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 4px)",
+                      width: 300,
+                      zIndex: 10000,
+                      background: "#fff",
+                      border: "1px solid #cfd6d2",
+                      borderRadius: 8,
+                      boxShadow: "0 14px 30px rgba(15,23,42,.14)",
+                      padding: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 6,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "asc")}
+                      >
+                        مرتب‌سازی صعودی
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "desc")}
+                      >
+                        مرتب‌سازی نزولی
+                      </button>
+                    </div>
+
+                    <input
+                      className="input"
+                      placeholder={`جستجو در ${filterLabels[key]}...`}
+                      value={filterSearch}
+                      onChange={(e) => setFilterSearch(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span>انتخاب چند مقدار</span>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#0f6b43",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections((current) => ({
+                              ...current,
+                              [key]: [...getUniqueFilterValues(key)],
+                            }))
+                          }
+                        >
+                          انتخاب همه
+                        </button>
+
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections((current) => ({
+                              ...current,
+                              [key]: [],
+                            }))
+                          }
+                        >
+                          پاک‌کردن
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {values.map((value) => (
+                        <label
+                          key={value}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "7px 4px",
+                            cursor: "pointer",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(value)}
+                            onChange={() => toggleFilterValue(key, value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))}
+
+                      {values.length === 0 && (
+                        <div
+                          style={{
+                            padding: 12,
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          مقداری پیدا نشد
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            title="حذف همه فیلترها"
+            style={{
+              flex: "0 0 42px",
+              height: 42,
+              border: "0",
+              background: "#dc2626",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 0,
+            }}
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+      </div>
+
       {/* =====================================================
           Table
       ===================================================== */}
@@ -1164,7 +1509,7 @@ onClick={exportProductsExcel}
             alignItems:
               "center",
             marginBottom:
-              18,
+              6,
           }}
         >
 
@@ -1173,8 +1518,8 @@ onClick={exportProductsExcel}
             <h2
               style={{
                 margin: 0,
-                fontSize: 18,
-                fontWeight: 800,
+                fontSize: 15,
+                fontWeight: 600,
               }}
             >
               لیست کالاها
@@ -1183,10 +1528,10 @@ onClick={exportProductsExcel}
             <p
               style={{
                 margin:
-                  "5px 0 0",
+                  "2px 0 0",
                 color:
                   "#64748b",
-                fontSize: 12,
+                fontSize: 11,
               }}
             >
               {numberFa(
@@ -1263,7 +1608,7 @@ onClick={exportProductsExcel}
 
               <tbody>
 
-                {products.map(
+                {filteredProducts.map(
                   (product) => (
 
                     <tr
@@ -1378,11 +1723,11 @@ onClick={exportProductsExcel}
                               )
                             }
                             title="ویرایش کالا"
+                            style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
                           >
                             <Pencil
                               size={14}
                             />
-                            ویرایش
                           </button>
 
                           {/* حذف */}
@@ -1395,11 +1740,11 @@ onClick={exportProductsExcel}
                               )
                             }
                             title="حذف کالا"
+                            style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
                           >
                             <Trash2
                               size={14}
                             />
-                            حذف
                           </button>
 
                         </div>
@@ -1409,6 +1754,14 @@ onClick={exportProductsExcel}
                     </tr>
 
                   )
+                )}
+
+                {filteredProducts.length === 0 && (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: "center", padding: 30 }}>
+                      کالایی با این فیلترها پیدا نشد
+                    </td>
+                  </tr>
                 )}
 
               </tbody>

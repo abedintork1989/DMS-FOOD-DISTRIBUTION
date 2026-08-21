@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eye, Trash2, Search, Plus } from "lucide-react";
+import { Eye, Trash2, Search, Plus, RotateCcw, Power } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import AppShell from "@/components/AppShell";
@@ -157,6 +157,36 @@ export default function CustomersPage() {
 
     setCustomers(visibleCustomers);
     setLoading(false);
+  }
+
+  async function toggleCustomerActive(id: string, currentStatus: boolean | null) {
+    const nextStatus = !currentStatus;
+
+    const ok = confirm(
+      nextStatus
+        ? "آیا می‌خواهید این مشتری را فعال کنید؟"
+        : "آیا می‌خواهید این مشتری را غیرفعال کنید؟"
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("customers")
+      .update({ active: nextStatus })
+      .eq("id", id);
+
+    if (error) {
+      alert("خطا در تغییر وضعیت مشتری:\n" + error.message);
+      return;
+    }
+
+    setCustomers((current) =>
+      current.map((customer) =>
+        customer.id === id
+          ? { ...customer, active: nextStatus }
+          : customer
+      )
+    );
   }
 
   async function deleteCustomer(id: string) {
@@ -411,11 +441,12 @@ export default function CustomersPage() {
       <div
         dir="rtl"
         style={{
-          width: "100%",
+          width: "97%",
           display: "flex",
           justifyContent: "flex-end",
-          marginBottom: 8,
-          marginTop : -110 ,
+          marginBottom: -43 ,
+          marginTop : -80 ,
+         
          
         }}
       >
@@ -446,7 +477,7 @@ export default function CustomersPage() {
           display: "flex",
           justifyContent: "center",
           marginRight : 200 , 
-          marginTop : -50 ,
+          marginTop : -20 ,
 
         }}
       >
@@ -661,8 +692,9 @@ export default function CustomersPage() {
           <button
             type="button"
             onClick={clearAllFilters}
+            title="حذف همه فیلترها"
             style={{
-              flex: "0 0 108px",
+              flex: "0 0 42px",
               height: 42,
               border: "0",
               background: "#dc2626",
@@ -670,9 +702,13 @@ export default function CustomersPage() {
               fontWeight: 900,
               cursor: "pointer",
               fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 0,
             }}
           >
-            حذف فیلتر
+            <RotateCcw size={17} />
           </button>
 
 
@@ -682,11 +718,18 @@ export default function CustomersPage() {
       <div
   className="panel"
   style={{
-    width: "100%",
+    width: "96%",
     margin: "0 auto",
   }}
 >
-        <div className="table-wrap">
+        <div
+          className="table-wrap"
+          style={{
+            width: "104%",
+            padding: "0px  0px",
+            boxSizing: "border-box",
+          }}
+        >
 
           {
             loading ?
@@ -696,7 +739,7 @@ export default function CustomersPage() {
               :
               <table
                 style={{
-                  width: "100%",
+                  width: "96%",
                   tableLayout: "fixed",
                 }}
               >
@@ -732,20 +775,20 @@ export default function CustomersPage() {
                         onClick={() => openCustomer(customer.id)}
                       >
 
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>
                           {customer.name}
                         </td>
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.customer_type || "-"}</td>
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>{customer.customer_type || "-"}</td>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>
                           {customer.branch_count > 0
                             ? customer.branch_count.toLocaleString("fa-IR")
                             : "-"}
                         </td>
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.province || "-"}</td>
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.city || "-"}</td>
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>{customer.visitor || "-"}</td>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>{customer.province || "-"}</td>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>{customer.city || "-"}</td>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>{customer.visitor || "-"}</td>
 
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>
                           <span
                             className={customer.active ? "badge success" : "badge danger"}
                           >
@@ -753,7 +796,7 @@ export default function CustomersPage() {
                           </span>
                         </td>
 
-                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                        <td style={{ padding: "12px 18px", textAlign: "center" }}>
                           <div
                             style={{
                               display: "flex",
@@ -765,24 +808,38 @@ export default function CustomersPage() {
 
                             <button
                               className="btn btn-secondary btn-small"
+                              title="مشاهده"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openCustomer(customer.id);
                               }}
+                              style={{ width: 34, height: 34, padding: 0, justifyContent: "center" }}
                             >
-                              <Eye size={15} />
-                              مشاهده
+                              <Eye size={16} />
+                            </button>
+
+                            <button
+                              className={customer.active ? "btn btn-secondary btn-small" : "btn btn-primary btn-small"}
+                              title={customer.active ? "غیرفعال کردن" : "فعال کردن"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCustomerActive(customer.id, customer.active);
+                              }}
+                              style={{ width: 34, height: 34, padding: 0, justifyContent: "center" }}
+                            >
+                              <Power size={17} />
                             </button>
 
                             <button
                               className="btn btn-danger btn-small"
+                              title="حذف"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 deleteCustomer(customer.id);
                               }}
+                              style={{ width: 34, height: 34, padding: 0, justifyContent: "center" }}
                             >
-                              <Trash2 size={15} />
-                              حذف
+                              <Trash2 size={16} />
                             </button>
 
                           </div>

@@ -7,6 +7,7 @@ import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { supabase } from "@/lib/supabase";
+import { closeOpenDocumentsForOrder, finalizeInvoiceDocument } from "@/lib/orderDocuments";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
@@ -37,6 +38,8 @@ export default function OrderDetailPage() {
   const id = params.id as string;
 
   const [order, setOrder] = useState<any>(null);
+  // نسخه ثابت فاکتور زمان تایید سفارش
+  const [orderSnapshot, setOrderSnapshot] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editedItems, setEditedItems] = useState<any[]>([]);
@@ -271,7 +274,27 @@ export default function OrderDetailPage() {
         return;
       }
 
-      const finalData = { ...orderData, order_items: items || [] };
+      // دریافت نسخه رسمی فاکتور (Snapshot)
+      // این داده بعد از تایید سفارش دیگر نباید توسط انبار تغییر کند.
+      const { data: snapshotData, error: snapshotError } = await supabase
+        .from("order_snapshots")
+        .select("*")
+        .eq("order_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (snapshotError) {
+        console.log("SNAPSHOT LOAD ERROR:", snapshotError);
+      }
+
+      setOrderSnapshot(snapshotData || null);
+
+      const finalData = {
+        ...orderData,
+        order_items: items || [],
+        order_snapshot: snapshotData || null,
+      };
       setOrder(finalData);
 
       // مقدار تاریخ ذخیره شده را برای نمایش مجدد در DatePicker برمی‌گردانیم.
@@ -446,6 +469,64 @@ export default function OrderDetailPage() {
     return editedItems.find((x: any) => x.id === item.id) || item;
   }
 
+  // نسخه رسمی فاکتور فقط از Snapshot خوانده می‌شود.
+  // اطلاعات عملیاتی انبار همچنان از order_items می‌آید.
+  function getSnapshotItems() {
+    return Array.isArray(orderSnapshot?.items)
+      ? orderSnapshot.items
+      : [];
+  }
+
+  function getSnapshotItem(item: any) {
+    const productId = item?.product_id;
+    if (!productId) return null;
+
+    return (
+      getSnapshotItems().find(
+        (snapshotItem: any) =>
+          String(snapshotItem?.product_id) === String(productId)
+      ) || null
+    );
+  }
+
+  function getConfirmedOrderCartons(item: any) {
+    const snapshotItem = getSnapshotItem(item);
+
+    if (snapshotItem) {
+      const value = snapshotItem.final_order_quantity;
+      if (value !== null && value !== undefined && value !== "") {
+        return Math.max(0, Math.floor(Number(value)));
+      }
+
+      const product = item?.products || {};
+      const cartonSize = Math.max(
+        Number(product.quantity_per_carton || 1),
+        1
+      );
+      return Math.ceil(Number(snapshotItem.quantity || 0) / cartonSize);
+    }
+
+    return getFinalOrderQuantity(item);
+  }
+
+  function getConfirmedPrice(item: any) {
+    const snapshotItem = getSnapshotItem(item);
+    if (snapshotItem) return Number(snapshotItem.final_price || 0);
+    return Number(item?.final_price || 0);
+  }
+
+  function getConfirmedConsumerPrice(item: any) {
+    const snapshotItem = getSnapshotItem(item);
+    if (snapshotItem) return Number(snapshotItem.consumer_price || 0);
+    return Number(item?.consumer_price || 0);
+  }
+
+  function getConfirmedDiscount(item: any) {
+    const snapshotItem = getSnapshotItem(item);
+    if (snapshotItem) return Number(snapshotItem.discount_percent || 0);
+    return Number(item?.discount_percent || 0);
+  }
+
   // تعداد کارتن اولیه‌ای که ویزیتور ثبت کرده است.
   // این مقدار فقط از quantity می‌آید و در ویرایش سفارش دست‌نخورده می‌ماند.
   function getOriginalCartons(item: any) {
@@ -477,30 +558,16 @@ export default function OrderDetailPage() {
     return getOriginalCartons(item);
   }
 
-  // جمع هر ردیف در انبار بر اساس «تعداد تحویلی (کارتن)» است.
-  // اگر هنوز مقدار تحویلی ثبت نشده باشد، مقدار تعداد نهایی سفارش نمایش داده می‌شود.
+  // تعداد تحویلی انبار فقط از فیلدهای عملیاتی order_items می‌آید.
   function getDeliveryCartons(item: any) {
     const currentItem = getCurrentItem(item);
-
-    /*
-      منطق انبار:
-      - قبل از ورود به حالت ویرایش، تعداد تحویلی باید همان
-        تعداد نهایی سفارش باشد.
-      - بعد از ورود به ویرایش، مقدار delivery_cartons مستقل
-        است و مسئول انبار می‌تواند آن را تغییر دهد.
-    */
-
-    if (!isEditing) {
-      return getFinalOrderQuantity(currentItem);
-    }
-
     const value = currentItem.delivery_cartons;
 
     if (value !== null && value !== undefined && value !== "") {
       return Math.max(0, Math.floor(Number(value)));
     }
 
-    return getFinalOrderQuantity(currentItem);
+    return getConfirmedOrderCartons(currentItem);
   }
 
   function calculateRowTotal(item: any) {
@@ -517,13 +584,23 @@ export default function OrderDetailPage() {
         ? Number(currentItem.delivery_units)
         : getDeliveryCartons(currentItem) * cartonSize;
 
-    return (
-      deliveryUnits *
-      Number(currentItem.final_price || 0)
+    return deliveryUnits * getConfirmedPrice(currentItem);
+  }
+
+  // مبلغ رسمی سفارش در لحظه تأیید؛ هرگز از داده‌های انبار محاسبه نمی‌شود.
+  function calculateConfirmedGrandTotal() {
+    if (orderSnapshot?.invoice_total !== null && orderSnapshot?.invoice_total !== undefined) {
+      return Number(orderSnapshot.invoice_total || 0);
+    }
+
+    return getSnapshotItems().reduce(
+      (sum: number, item: any) =>
+        sum + Number(item.total_purchase_price || 0),
+      0
     );
   }
 
-  // جمع کل سفارش نیز بر اساس تعداد تحویلی محاسبه می‌شود.
+  // مبلغ واقعی تحویل‌شده توسط انبار.
   function calculateGrandTotal() {
     return editedItems.reduce(
       (sum: number, item: any) =>
@@ -537,8 +614,8 @@ export default function OrderDetailPage() {
       (item: any) => ({
         ...item,
         delivery_cartons:
-          item.final_order_quantity ??
-          getFinalOrderQuantity(item),
+          item.delivery_cartons ??
+          getConfirmedOrderCartons(item),
       })
     );
 
@@ -854,6 +931,8 @@ export default function OrderDetailPage() {
       return;
     }
 
+    await closeOpenDocumentsForOrder(id);
+
     setIsEditing(false);
     setSelectedProductIds({});
     setPendingCartons({});
@@ -1049,39 +1128,23 @@ export default function OrderDetailPage() {
           1
         );
 
-        const finalOrderQuantity =
-          Math.max(
-            0,
-            Math.floor(
-              Number(
-                getFinalOrderQuantity(item)
-              )
-            )
-          );
-
-        const finalPrice = Number(
-          item.final_price || 0
-        );
-
-        const consumerPrice = Number(
-          item.consumer_price || 0
-        );
-
-        const discountPercent = Number(
-          item.discount_percent || 0
-        );
+        // بعد از تأیید، تعداد و قیمت سفارش رسمی فقط از Snapshot می‌آیند.
+        // انبار اجازه تغییر این اطلاعات را ندارد و فقط اطلاعات تحویل را ثبت می‌کند.
+        const confirmedCartons = getConfirmedOrderCartons(item);
 
         const deliveryCartons = Math.max(
           0,
           Math.floor(
-            Number(item.delivery_cartons ?? finalOrderQuantity)
+            Number(item.delivery_cartons ?? confirmedCartons)
           )
         );
 
-        const total =
-          deliveryCartons *
-          cartonSize *
-          finalPrice;
+        const deliveryUnits =
+          item.delivery_units !== undefined &&
+          item.delivery_units !== null &&
+          item.delivery_units !== ""
+            ? Math.max(0, Number(item.delivery_units))
+            : deliveryCartons * cartonSize;
 
         // ابتدا فقط UPDATE را انجام می‌دهیم.
         // نتیجه UPDATE را با SELECT مخلوط نمی‌کنیم تا RLS/RETURNING
@@ -1090,21 +1153,15 @@ export default function OrderDetailPage() {
           await supabase
             .from("order_items")
             .update({
-              // مهم: quantity را اصلاً تغییر نمی‌دهیم.
-              final_order_quantity:
-                finalOrderQuantity,
+              // سفارش رسمی قفل است؛ فقط اطلاعات عملیاتی تحویل انبار تغییر می‌کنند.
               delivery_cartons:
                 deliveryCartons,
-              consumer_price:
-                consumerPrice,
-              discount_percent:
-                discountPercent,
-              purchase_price:
-                finalPrice,
-              total_purchase_price:
-                total,
-              final_price:
-                finalPrice,
+              delivery_units:
+                item.delivery_units !== undefined &&
+                item.delivery_units !== null &&
+                item.delivery_units !== ""
+                  ? Number(item.delivery_units)
+                  : null,
             })
             .eq("id", item.id);
 
@@ -1128,7 +1185,7 @@ export default function OrderDetailPage() {
           error: verifyItemError,
         } = await supabase
           .from("order_items")
-          .select("id, final_order_quantity, delivery_cartons")
+          .select("id, delivery_cartons, delivery_units")
           .eq("id", item.id)
           .maybeSingle();
 
@@ -1152,24 +1209,6 @@ export default function OrderDetailPage() {
 شناسه کالا: ${item.id}
 
 Policy مربوط به SELECT جدول order_items را بررسی کنید.`
-          );
-
-          setSaving(false);
-          return;
-        }
-
-        if (
-          Number(savedItem.final_order_quantity) !==
-          finalOrderQuantity
-        ) {
-          alert(
-            `مقدار تعداد نهایی ذخیره نشد.
-
-شناسه کالا: ${item.id}
-مقدار موردنظر: ${finalOrderQuantity}
-مقدار موجود در دیتابیس: ${savedItem.final_order_quantity}
-
-اگر این دو عدد متفاوت هستند، احتمالاً Trigger یا Rule دیگری مقدار را تغییر می‌دهد.`
           );
 
           setSaving(false);
@@ -1227,6 +1266,13 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
             item.final_price || 0
           );
 
+          const deliveryUnits =
+            item.delivery_units !== undefined &&
+            item.delivery_units !== null &&
+            item.delivery_units !== ""
+              ? Math.max(0, Number(item.delivery_units))
+              : finalOrderQuantity * cartonSize;
+
           return {
             order_id: id,
             product_id: item.product_id,
@@ -1236,6 +1282,12 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
               finalOrderQuantity,
             delivery_cartons:
               finalOrderQuantity,
+            delivery_units:
+              item.delivery_units !== undefined &&
+              item.delivery_units !== null &&
+              item.delivery_units !== ""
+                ? Number(item.delivery_units)
+                : null,
             consumer_price: Number(
               item.consumer_price || 0
             ),
@@ -1245,9 +1297,7 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
             purchase_price:
               finalPrice,
             total_purchase_price:
-              finalOrderQuantity *
-              cartonSize *
-              finalPrice,
+              deliveryUnits * finalPrice,
             final_price:
               finalPrice,
           };
@@ -1475,6 +1525,12 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
         alert(`خطا در ثبت تحویل سفارش: ${error.message}`);
         return;
       }
+
+      await finalizeInvoiceDocument(id, {
+        invoiceTotal: Number(order.invoice_total || 0),
+        sendDate: order.warehouse_send_date || order.send_date || null,
+        deliveryDate: order.delivery_date || null,
+      });
 
       alert("وضعیت سفارش با موفقیت به «تحویل داده شد» تغییر کرد.");
       await loadOrder();
@@ -2151,6 +2207,22 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
           </div>
         )}
 
+        {orderSnapshot?.items && (
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 12,
+              borderRadius: 10,
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+            }}
+          >
+            🔒 نسخه رسمی فاکتور زمان تایید ثبت شده است.
+            <br />
+            مقدار سفارش مشتری از Snapshot خوانده می‌شود و تغییرات انبار نباید آن را تغییر دهد.
+          </div>
+        )}
+
         <h3>کالاهای سفارش</h3>
 
         <div
@@ -2181,6 +2253,7 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد اولیه سفارش (کارتن)</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد نهایی سفارش (کارتن)</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد تحویلی (کارتن)</th>
+                <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>کسری فروش (کارتن)</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تعداد جزء</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>قیمت مصرف کننده</th>
                 <th style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff" }}>تخفیف</th>
@@ -2210,23 +2283,27 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
                   // این مقدار، مقدار اولیه ویزیتور است
                   // و در حالت ویرایش هرگز تغییر نمی‌کند.
                   const originalCartons =
-                    getOriginalCartons(
-                      currentItem
-                    );
-
-                  const quantity = Number(
-                    currentItem.quantity || 0
-                  );
+                    (() => {
+                      const snapshotItem = getSnapshotItem(currentItem);
+                      if (!snapshotItem) return getOriginalCartons(currentItem);
+                      return Math.ceil(
+                        Number(snapshotItem.quantity || 0) / quantityPerCarton
+                      );
+                    })();
 
                   const finalOrderQuantity =
-                    getFinalOrderQuantity(
-                      currentItem
-                    );
+                    getConfirmedOrderCartons(currentItem);
+
+                  const deliveryCartons =
+                    getDeliveryCartons(currentItem);
+
+                  const shortageCartons = Math.max(
+                    0,
+                    finalOrderQuantity - deliveryCartons
+                  );
 
                   const rowTotal =
-                    calculateRowTotal(
-                      currentItem
-                    );
+                    calculateRowTotal(currentItem);
 
                   return (
                     <tr
@@ -2326,6 +2403,18 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
                         )}
                       </td>
 
+                      {/* کسری فروش: سفارش رسمی منهای تحویل واقعی */}
+                      <td>
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            color: shortageCartons > 0 ? "#dc2626" : "#166534",
+                          }}
+                        >
+                          {shortageCartons.toLocaleString()}
+                        </span>
+                      </td>
+
                       {/* تعداد جزء */}
                       <td>
                         {isEditing ? (
@@ -2358,25 +2447,16 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
                       </td>
 
                       <td>
-                        {Number(
-                          currentItem.consumer_price ||
-                            0
-                        ).toLocaleString()}
+                        {getConfirmedConsumerPrice(currentItem).toLocaleString()}
                       </td>
 
                       <td>
-                        {Number(
-                          currentItem.discount_percent ||
-                            0
-                        )}{" "}
+                        {getConfirmedDiscount(currentItem)}{" "}
                         %
                       </td>
 
                       <td>
-                        {Number(
-                          currentItem.final_price ||
-                            0
-                        ).toLocaleString()}
+                        {getConfirmedPrice(currentItem).toLocaleString()}
                       </td>
 
                       <td>
@@ -2401,14 +2481,39 @@ Policy مربوط به UPDATE/SELECT ستون delivery_cartons در جدول ord
             color: "#475569",
           }}
         >
-          ℹ️ «تعداد اولیه سفارش (به کارتن)» مقدار ثبت‌شده توسط ویزیتور است و
-          تغییر نمی‌کند. «تعداد نهایی سفارش (به کارتن)» تصمیم نهایی مدیر است.
-          «تعداد جزء» نیز به‌صورت لحظه‌ای از تعداد نهایی کارتن × تعداد داخل کارتن
-          محاسبه می‌شود و با تغییر تعداد نهایی فوراً تغییر می‌کند.
+          🔒 تعداد اولیه و تعداد نهایی سفارش از نسخه رسمی فاکتور زمان تأیید خوانده می‌شوند و
+          با تغییرات انبار تغییر نمی‌کنند. «تعداد تحویلی» مقدار واقعی تحویل انبار است و
+          «کسری فروش» اختلاف سفارش تأییدشده با مقدار تحویل‌شده است.
         </div>
 
-        <div style={{ marginTop: 30, fontSize: 20, fontWeight: "bold" }}>
-          جمع کل سفارش: {calculateGrandTotal().toLocaleString()} ریال
+        <div
+          style={{
+            marginTop: 20,
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 12,
+          }}
+        >
+          <div style={{ padding: 14, borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+            <div style={{ fontSize: 12, color: "#475569" }}>مبلغ سفارش تأییدشده</div>
+            <div style={{ marginTop: 5, fontSize: 18, fontWeight: 800 }}>
+              {calculateConfirmedGrandTotal().toLocaleString()} ریال
+            </div>
+          </div>
+
+          <div style={{ padding: 14, borderRadius: 10, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+            <div style={{ fontSize: 12, color: "#475569" }}>مبلغ تحویل‌شده</div>
+            <div style={{ marginTop: 5, fontSize: 18, fontWeight: 800 }}>
+              {calculateGrandTotal().toLocaleString()} ریال
+            </div>
+          </div>
+
+          <div style={{ padding: 14, borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa" }}>
+            <div style={{ fontSize: 12, color: "#475569" }}>فروش از دست‌رفته</div>
+            <div style={{ marginTop: 5, fontSize: 18, fontWeight: 800, color: "#c2410c" }}>
+              {Math.max(0, calculateConfirmedGrandTotal() - calculateGrandTotal()).toLocaleString()} ریال
+            </div>
+          </div>
         </div>
 
         {!isEditing && order.status === "delivered" && (

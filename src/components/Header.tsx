@@ -44,6 +44,7 @@ const commercialSections = [
     children: [
       { href: "/products", label: "کالاها", icon: Boxes },
       { href: "/orders", label: "سفارشات", icon: ShoppingCart },
+      { href: "/returns", label: "مرجوعی", icon: PackageSearch },
       { href: "/warehouse", label: "انبار", icon: Warehouse },
     ],
   },
@@ -69,6 +70,11 @@ const salesSections = [
     href: "/sales",
     icon: LayoutDashboard,
     disabled: true,
+  },
+  {
+    label: "مرکز کنترل ویزیتورها",
+    href: "/sales/visitor-control",
+    icon: UserRound,
   },
   {
     label: "مدیریت ویزیتورها",
@@ -157,10 +163,15 @@ export default function Sidebar() {
   }
 
   return (
-    <header
-      className="premium-header dms-premium-header"
+    <aside
+      className="premium-header dms-premium-header dms-sidebar-left"
       style={{
-        position: "relative",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "280px",
+        height: "100vh",
+        flexDirection: "column",
         backgroundColor: "#b9ddc6",
         backgroundImage: `
           radial-gradient(circle at 8% 50%, rgba(15,107,67,0.14) 0 80px, transparent 81px),
@@ -185,22 +196,18 @@ export default function Sidebar() {
 
       >
         <div className="premium-logo">
-          <div className="logo-shape">فروش</div>
-        </div>
-
-        <div className="brand-text" style={{ background: "transparent", border: "none", boxShadow: "none" }}>
-          <div className="brand-title">مدیریت هوشمند فروش</div>
-          <div className="brand-subtitle">سامانه مدیریت هوشمند فروش</div>
+          <div className="logo-shape">SSM</div>
         </div>
       </Link>
 
       <nav
-        className="premium-menu"
+        className="premium-menu sidebar-navigation"
         aria-label="بخش‌های اصلی نرم‌افزار"
         style={{
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          flexDirection: "column",
+          alignItems: "stretch",
+          justifyContent: "flex-start",
           flex: "1 1 0%",
           minWidth: 0,
         }}
@@ -211,24 +218,26 @@ export default function Sidebar() {
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
-            width: "860px",
+            width: "100%",
             maxWidth: "100%",
             minWidth: 0,
             direction: "rtl",
             zIndex: 2000,
-            padding: 3,
-            background: "#eef3f0",
-            border: "1px solid #c7d0cb",
-            borderRadius: 8,
-            boxShadow: "0 6px 16px rgba(15,23,42,0.08)",
+            padding: 0,
+            background: "transparent",
+            border: "none",
+            borderRadius: 0,
+            boxShadow: "none",
           }}
         >
           {/* دو منوی اصلی */}
           <div
             style={{
               display: "flex",
+              flexDirection: "column",
               width: "100%",
               alignItems: "stretch",
+              gap: 10,
             }}
           >
             <button
@@ -246,7 +255,7 @@ export default function Sidebar() {
               aria-expanded={openModule === "commercial"}
               style={{
                 flex: 1,
-                width: "50%",
+                width: "100%",
                 height: 48,
                 borderRadius: 6,
                 background:
@@ -298,7 +307,7 @@ export default function Sidebar() {
               aria-expanded={openModule === "sales"}
               style={{
                 flex: 1,
-                width: "50%",
+                width: "100%",
                 height: 48,
                 borderRight: "1px solid #dfe5e2",
                 borderRadius: 6,
@@ -343,6 +352,7 @@ export default function Sidebar() {
                 width: "100%",
                 boxSizing: "border-box",
                 display: "flex",
+                flexDirection: "column",
                 alignItems: "stretch",
                 direction: "rtl",
                 flexWrap: "nowrap",
@@ -579,6 +589,6 @@ export default function Sidebar() {
           <LogOut size={18} />
         </button>
       </div>
-    </header>
+    </aside>
   );
 }

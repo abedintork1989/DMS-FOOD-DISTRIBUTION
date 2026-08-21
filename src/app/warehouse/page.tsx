@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye } from "lucide-react";
+import { Eye, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import AppShell from "@/components/AppShell";
@@ -65,48 +65,6 @@ function formatDate(value: string) {
   } catch {
     return value;
   }
-}
-
-function formatSendDate(value: string | null | undefined) {
-  if (!value) return "-";
-
-  const clean = String(value).trim();
-  const raw = clean.substring(0, 10);
-
-  const jalaliParts = raw.split("/");
-  if (
-    jalaliParts.length === 3 &&
-    Number(jalaliParts[0]) >= 1300 &&
-    Number(jalaliParts[0]) <= 1500
-  ) {
-    return `${toPersianDigits(jalaliParts[0])}/${toPersianDigits(
-      String(jalaliParts[1]).padStart(2, "0")
-    )}/${toPersianDigits(
-      String(jalaliParts[2]).padStart(2, "0")
-    )}`;
-  }
-
-  const date = new Date(`${raw}T12:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return clean;
-  }
-
-  const formatter = new Intl.DateTimeFormat(
-    "fa-IR-u-ca-persian-nu-latn",
-    {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }
-  );
-
-  const parts = formatter.formatToParts(date);
-  const year = parts.find((p) => p.type === "year")?.value || "";
-  const month = parts.find((p) => p.type === "month")?.value || "";
-  const day = parts.find((p) => p.type === "day")?.value || "";
-
-  return `${toPersianDigits(year)}/${toPersianDigits(month)}/${toPersianDigits(day)}`;
 }
 
 // نمایش تاریخ تحویل همیشه به شمسی.
@@ -200,7 +158,7 @@ function warehouseStatus(
   cancelledFrom?: string | null
 ) {
   if (status === "delivered") {
-    return { label: "تحویل داده شد", className: "info" };
+    return { label: "تحویل داده شد", className: "success" };
   }
 
   if (status === "cancelled") {
@@ -215,17 +173,49 @@ function warehouseStatus(
 
     return {
       label: `ابطال (${fromLabel})`,
-      className: "cancelled",
+      className: "danger",
     };
   }
 
   return { label: "در حال ارسال", className: "warning" };
 }
 
+type WarehouseFilterKey =
+  | "customer"
+  | "province"
+  | "visitor"
+  | "createdAt"
+  | "sendDate"
+  | "deliveryDate"
+  | "invoiceTotal"
+  | "status";
+
 export default function WarehousePage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+
+  /* ------------------------------------------------ */
+  /* فیلتر و جستجوی ستونی */
+  /* ------------------------------------------------ */
+
+  const [filterSelections, setFilterSelections] = useState<
+    Record<WarehouseFilterKey, string[]>
+  >({
+    customer: [],
+    province: [],
+    visitor: [],
+    createdAt: [],
+    sendDate: [],
+    deliveryDate: [],
+    invoiceTotal: [],
+    status: [],
+  });
+
+  const [openFilter, setOpenFilter] = useState<WarehouseFilterKey | null>(null);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [sortKey, setSortKey] = useState<WarehouseFilterKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     loadOrders();
@@ -258,87 +248,196 @@ export default function WarehousePage() {
     setLoading(false);
   }
 
+  const filterLabels: Record<WarehouseFilterKey, string> = {
+    customer: "مشتری",
+    province: "استان",
+    visitor: "ویزیتور",
+    createdAt: "تاریخ ثبت سفارش",
+    sendDate: "تاریخ ارسال سفارش",
+    deliveryDate: "تاریخ تحویل سفارش",
+    invoiceTotal: "مبلغ کل",
+    status: "وضعیت",
+  };
+
+  function getFilterValue(order: Order, key: WarehouseFilterKey) {
+    if (key === "customer") return order.customers?.name || order.customer_name || "";
+    if (key === "province") return order.customers?.province || "";
+    if (key === "visitor") return order.customers?.visitor || order.visitor || "";
+    if (key === "createdAt") return formatDate(order.created_at);
+    if (key === "sendDate")
+      return formatDeliveryDate(order.warehouse_send_date || order.send_date || null);
+    if (key === "deliveryDate")
+      return formatDeliveryDate(
+        order.delivery_date ||
+          order.warehouse_send_date ||
+          order.send_date ||
+          getTodayJalaliString()
+      );
+    if (key === "invoiceTotal") return money(order.invoice_total || 0);
+    return warehouseStatus(order.status, order.cancelled_from).label;
+  }
+
+  function getUniqueFilterValues(key: WarehouseFilterKey) {
+    return Array.from(
+      new Set(orders.map((order) => getFilterValue(order, key)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "fa"));
+  }
+
+  function toggleFilterValue(key: WarehouseFilterKey, value: string) {
+    setFilterSelections((current) => {
+      const selected = current[key];
+      const next = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+
+      return { ...current, [key]: next };
+    });
+  }
+
+  function clearAllFilters() {
+    setFilterSelections({
+      customer: [],
+      province: [],
+      visitor: [],
+      createdAt: [],
+      sendDate: [],
+      deliveryDate: [],
+      invoiceTotal: [],
+      status: [],
+    });
+    setOpenFilter(null);
+    setFilterSearch("");
+    setSortKey(null);
+  }
+
+  function sortByFilter(key: WarehouseFilterKey, direction: "asc" | "desc") {
+    setSortKey(key);
+    setSortDirection(direction);
+  }
+
+  const filteredOrders = [...orders]
+    .filter((order) =>
+      (Object.keys(filterSelections) as WarehouseFilterKey[]).every((key) => {
+        const selected = filterSelections[key];
+        if (selected.length === 0) return true;
+        return selected.includes(getFilterValue(order, key));
+      })
+    )
+    .sort((a, b) => {
+      if (!sortKey) return 0;
+
+      const av = getFilterValue(a, sortKey);
+      const bv = getFilterValue(b, sortKey);
+
+      const result = av.localeCompare(bv, "fa", { numeric: true });
+      return sortDirection === "asc" ? result : -result;
+    });
+
   const columns = useMemo<DataTableColumn<Order>[]>(
     () => [
       {
         key: "order_number",
         title: "کد سفارش",
-        width: 100,
-        filterable: true,
+        width: 90,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) => row.order_number || "-",
+      },
+      {
+        key: "doc_type",
+        title: "نوع سند",
+        width: 100,
+        filterable: false,
+        searchable: true,
+        sortable: false,
+        accessor: () => "فاکتور فروش",
+        render: () => (
+          <span
+            style={{
+              display: "inline-flex",
+              padding: "5px 10px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              background: "#ecfdf5",
+              color: "#047857",
+            }}
+          >
+            فاکتور فروش
+          </span>
+        ),
       },
       {
         key: "customer",
         title: "مشتری",
-        width: 130,
-        filterable: true,
+        width: 120,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) => row.customers?.name || row.customer_name || "-",
       },
       {
         key: "province",
         title: "استان",
         width: 90,
-        filterable: true,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) => row.customers?.province || "-",
       },
       {
         key: "visitor",
         title: "ویزیتور",
-        width: 110,
-        filterable: true,
+        width: 100,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) => row.customers?.visitor || row.visitor || "-",
       },
       {
         key: "created_at",
         title: "تاریخ ثبت سفارش",
-        width: 120,
-        filterable: true,
+        width: 110,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) => formatDate(row.created_at),
       },
       {
         key: "warehouse_send_date",
         title: "تاریخ ارسال سفارش",
-        width: 130,
-        filterable: true,
+        width: 120,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         accessor: (row) =>
-          formatSendDate(
-            row.warehouse_send_date || row.send_date || null
-          ),
+          formatDeliveryDate(row.warehouse_send_date || row.send_date || null),
       },
       {
         key: "delivery_date",
         title: "تاریخ تحویل سفارش",
-        width: 130,
-        filterable: true,
+        width: 120,
+        filterable: false,
         searchable: true,
-        sortable: true,
-        // اگر تاریخ تحویل هنوز ثبت نشده باشد (هنوز ویرایش نخورده)،
-        // به‌صورت پیش‌فرض تاریخ امروز به شمسی نمایش داده می‌شود.
-        // به محض ثبت واقعی از صفحه ویرایش، همان مقدار ذخیره‌شده نمایش داده می‌شود.
+        sortable: false,
+        // اگر تاریخ تحویل هنوز ثبت نشده باشد (سفارش هنوز در حال ارسال
+        // است)، به‌صورت پیش‌فرض همان تاریخ ارسال سفارش نمایش داده می‌شود.
         accessor: (row) =>
-          row.delivery_date
-            ? formatDeliveryDate(row.delivery_date)
-            : formatDeliveryDate(getTodayJalaliString()),
+          formatDeliveryDate(
+            row.delivery_date ||
+              row.warehouse_send_date ||
+              row.send_date ||
+              getTodayJalaliString()
+          ),
       },
       {
         key: "invoice_total",
         title: "مبلغ کل",
-        width: 140,
-        filterable: true,
+        width: 100,
+        filterable: false,
         searchable: true,
-        sortable: true,
+        sortable: false,
         type: "number",
         accessor: (row) => Number(row.invoice_total || 0),
         render: (value) => <strong>{money(Number(value || 0))}</strong>,
@@ -347,81 +446,34 @@ export default function WarehousePage() {
         key: "status",
         title: "وضعیت",
         width: 110,
-        filterable: true,
+        filterable: false,
         searchable: true,
-        sortable: true,
-        accessor: (row) =>
-          warehouseStatus(row.status, row.cancelled_from).label,
+        sortable: false,
+        accessor: (row) => warehouseStatus(row.status, row.cancelled_from).label,
         render: (_value, row) => {
-          const status = warehouseStatus(
-            row.status,
-            row.cancelled_from
-          );
+          const status = warehouseStatus(row.status, row.cancelled_from);
 
-          const background =
-            row.status === "approved"
-              ? "#fed7aa"
-              : row.status === "delivered"
-              ? "#dcfce7"
-              : row.status === "cancelled"
-              ? "#fecaca"
-              : "#f8fafc";
-
-          const foreground =
-            row.status === "approved"
-              ? "#9a3412"
-              : row.status === "delivered"
-              ? "#166534"
-              : row.status === "cancelled"
-              ? "#b91c1c"
-              : "#475569";
-
-          return (
-            <div
-              style={{
-                width: "calc(100% + 12px)",
-                minHeight: "100%",
-                margin: "-8px -6px",
-                padding: "8px 6px",
-                boxSizing: "border-box",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background,
-                color: foreground,
-                fontWeight: 700,
-                textAlign: "center",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {status.label}
-            </div>
-          );
+          return <span className={`badge ${status.className}`}>{status.label}</span>;
         },
       },
       {
         key: "actions",
         title: "عملیات",
-        width: 120,
+        width: 110,
         filterable: false,
         searchable: false,
         sortable: false,
         accessor: () => "",
         render: (_value, row) => (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-small"
-              onClick={() => router.push(`/warehouse/${row.id}`)}
-            >
-              <Eye size={15} />
-              {row.status === "cancelled"
-                ? "مشاهده"
-                : "مشاهده / ویرایش"}
-            </button>
-
-
-          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={() => router.push(`/warehouse/${row.id}`)}
+            title={row.status === "cancelled" ? "مشاهده" : "مشاهده / ویرایش"}
+            style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
+          >
+            <Eye size={15} />
+          </button>
         ),
       },
     ],
@@ -431,64 +483,30 @@ export default function WarehousePage() {
   return (
     <AppShell>
       <style jsx global>{`
-        .warehouse-page-auto {
+        .warehouse-page-compact table {
           width: 100% !important;
-          max-width: 100% !important;
-          box-sizing: border-box !important;
-        }
-
-        .warehouse-page-auto .table-wrap {
-          width: 100% !important;
-          max-width: 100% !important;
-          overflow-x: hidden !important;
-        }
-
-        .warehouse-page-auto table {
-          width: 100% !important;
-          max-width: 100% !important;
           table-layout: fixed !important;
         }
 
-        .warehouse-page-auto th,
-        .warehouse-page-auto td {
-          padding: 7px 5px !important;
-          font-size: clamp(11px, 0.82vw, 14px) !important;
-          line-height: 1.35 !important;
+        .warehouse-page-compact th,
+        .warehouse-page-compact td {
+          padding: 8px 6px !important;
+          font-size: 13px !important;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          box-sizing: border-box !important;
+          text-align: center !important;
         }
 
-        .warehouse-page-auto th:nth-child(1),
-        .warehouse-page-auto td:nth-child(1) { width: 8% !important; }
+        .warehouse-page-compact .table-wrap {
+          width: 100% !important;
+          overflow-x: hidden !important;
+        }
 
-        .warehouse-page-auto th:nth-child(2),
-        .warehouse-page-auto td:nth-child(2) { width: 13% !important; }
-
-        .warehouse-page-auto th:nth-child(3),
-        .warehouse-page-auto td:nth-child(3) { width: 8% !important; }
-
-        .warehouse-page-auto th:nth-child(4),
-        .warehouse-page-auto td:nth-child(4) { width: 10% !important; }
-
-        .warehouse-page-auto th:nth-child(5),
-        .warehouse-page-auto td:nth-child(5) { width: 10% !important; }
-
-        .warehouse-page-auto th:nth-child(6),
-        .warehouse-page-auto td:nth-child(6) { width: 10% !important; }
-
-        .warehouse-page-auto th:nth-child(7),
-        .warehouse-page-auto td:nth-child(7) { width: 10% !important; }
-
-        .warehouse-page-auto th:nth-child(8),
-        .warehouse-page-auto td:nth-child(8) { width: 11% !important; }
-
-        .warehouse-page-auto th:nth-child(9),
-        .warehouse-page-auto td:nth-child(9) { width: 8% !important; }
-
-        .warehouse-page-auto th:nth-child(10),
-        .warehouse-page-auto td:nth-child(10) { width: 13% !important; min-width: 135px !important; }
+        .warehouse-page-compact .data-table-header {
+          width: 100% !important;
+          justify-content: center !important;
+        }
       `}</style>
 
       <PageHeader
@@ -496,7 +514,248 @@ export default function WarehousePage() {
         subtitle="مدیریت سفارش‌های تأییدشده و تحویل سفارشات"
       />
 
-      <div className="panel warehouse-page-auto">
+      {/* نوار فیلتر مستقل از جدول */}
+      <div
+        dir="rtl"
+        style={{
+          width: "100%",
+          marginBottom: 12,
+          marginTop: -18,
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "78%",
+            display: "flex",
+            alignItems: "stretch",
+            direction: "rtl",
+            background: "#f2f4f3",
+            border: "1px solid #cfd6d2",
+            borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(15,23,42,0.06)",
+            overflow: "visible",
+          }}
+        >
+          {(Object.keys(filterLabels) as WarehouseFilterKey[]).map((key) => {
+            const isOpen = openFilter === key;
+            const selected = filterSelections[key];
+
+            const values = getUniqueFilterValues(key).filter((value) =>
+              value.toLowerCase().includes(filterSearch.toLowerCase())
+            );
+
+            return (
+              <div
+                key={key}
+                style={{
+                  position: "relative",
+                  flex: "1 1 0",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenFilter((current) => (current === key ? null : key));
+                    setFilterSearch("");
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    border: "0",
+                    borderLeft: "1px solid #cfd6d2",
+                    borderRadius: 0,
+                    background: selected.length ? "#149b5c" : "#f2f4f3",
+                    color: selected.length ? "#fff" : "#1f2937",
+                    fontWeight: selected.length ? 800 : 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    padding: "0 10px",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selected.length
+                      ? `${filterLabels[key]} (${selected.length})`
+                      : filterLabels[key]}
+                  </span>
+
+                  <span style={{ fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 4px)",
+                      width: 300,
+                      zIndex: 10000,
+                      background: "#fff",
+                      border: "1px solid #cfd6d2",
+                      borderRadius: 8,
+                      boxShadow: "0 14px 30px rgba(15,23,42,.14)",
+                      padding: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 6,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "asc")}
+                      >
+                        مرتب‌سازی صعودی
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => sortByFilter(key, "desc")}
+                      >
+                        مرتب‌سازی نزولی
+                      </button>
+                    </div>
+
+                    <input
+                      className="input"
+                      placeholder={`جستجو در ${filterLabels[key]}...`}
+                      value={filterSearch}
+                      onChange={(e) => setFilterSearch(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span>انتخاب چند مقدار</span>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#0f6b43",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections((current) => ({
+                              ...current,
+                              [key]: [...getUniqueFilterValues(key)],
+                            }))
+                          }
+                        >
+                          انتخاب همه
+                        </button>
+
+                        <button
+                          type="button"
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                          onClick={() =>
+                            setFilterSelections((current) => ({
+                              ...current,
+                              [key]: [],
+                            }))
+                          }
+                        >
+                          پاک‌کردن
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {values.map((value) => (
+                        <label
+                          key={value}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "7px 4px",
+                            cursor: "pointer",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(value)}
+                            onChange={() => toggleFilterValue(key, value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))}
+
+                      {values.length === 0 && (
+                        <div
+                          style={{
+                            padding: 12,
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          مقداری پیدا نشد
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            title="حذف همه فیلترها"
+            style={{
+              flex: "0 0 42px",
+              height: 42,
+              border: "0",
+              background: "#dc2626",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 0,
+            }}
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+      </div>
+
+      <div className="panel warehouse-page-compact">
         {loading ? (
           <div style={{ padding: 40, textAlign: "center" }}>
             در حال دریافت سفارشات انبار...
@@ -513,10 +772,9 @@ export default function WarehousePage() {
           </div>
         ) : (
           <DataTable
-            data={orders}
+            data={filteredOrders}
             columns={columns}
             rowKey={(order) => order.id}
-            rowClassName={() => ""}
             pageSize={0}
             emptyText="سفارشی در انبار پیدا نشد."
           />
