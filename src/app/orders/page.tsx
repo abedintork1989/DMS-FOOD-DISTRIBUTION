@@ -18,6 +18,7 @@ import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
 import DataTable, { DataTableColumn } from "@/components/DataTable/DataTable";
 import { supabase } from "@/lib/supabase";
+import type { OrderDocument } from "@/lib/orderDocuments";
 
 type Customer = {
   id: string;
@@ -1100,6 +1101,7 @@ export default function OrdersPage() {
     "فاکتور فروش": { bg: "#ecfdf5", color: "#047857" },
   };
 
+ 
   const orderTableColumns: DataTableColumn<DocumentRow>[] = [
     {
       key: "order_number",
@@ -1210,6 +1212,7 @@ export default function OrdersPage() {
       filterable: false,
       searchable: true,
       sortable: false,
+     
       type: "number",
       accessor: (row) => row.invoiceTotal,
       render: (value) => (

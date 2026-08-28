@@ -27,6 +27,13 @@ type Profile = {
   active: boolean | null;
 };
 
+type SalesChannel = {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+};
+
 type Territory = {
   id?: string;
   province: string;
@@ -50,6 +57,8 @@ type Visitor = {
   residential_city: string | null;
   active: boolean;
   tracking_enabled: boolean;
+  sales_channel_id: string | null;
+  sales_channel?: SalesChannel | null;
   created_at: string;
   updated_at: string;
   territories: Territory[];
@@ -68,6 +77,7 @@ type VisitorForm = {
   residential_city: string;
   active: boolean;
   tracking_enabled: boolean;
+  sales_channel_id: string;
   territories: Territory[];
 };
 
@@ -92,6 +102,7 @@ const emptyForm: VisitorForm = {
   residential_city: "",
   active: true,
   tracking_enabled: false,
+  sales_channel_id: "",
   territories: [emptyTerritory()],
 };
 
@@ -1023,6 +1034,7 @@ function PersianDatePicker({
 
 export default function SalesVisitorsPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [salesChannels, setSalesChannels] = useState<SalesChannel[]>([]);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1098,7 +1110,7 @@ export default function SalesVisitorsPage() {
 
     try {
       await ensureFreshSession();
-      const [profilesResult, visitorsResult, territoriesResult] =
+      const [profilesResult, channelsResult, visitorsResult, territoriesResult] =
         await Promise.all([
           supabase
             .from("profiles")
@@ -1107,9 +1119,15 @@ export default function SalesVisitorsPage() {
             .order("full_name", { ascending: true }),
 
           supabase
+            .from("sales_channels")
+            .select("id,name,code,active")
+            .eq("active", true)
+            .order("name"),
+
+          supabase
             .from("sales_visitors")
             .select(
-              "id,profile_id,full_name,phone,avatar_url,employee_code,gender,birth_date,residential_address,residential_province,residential_city,active,tracking_enabled,created_at,updated_at"
+              "id,profile_id,full_name,phone,avatar_url,employee_code,gender,birth_date,residential_address,residential_province,residential_city,active,tracking_enabled,sales_channel_id,created_at,updated_at"
             )
             .order("created_at", { ascending: false }),
 
@@ -1170,6 +1188,8 @@ export default function SalesVisitorsPage() {
             : null,
           active: row.active !== false,
           tracking_enabled: row.tracking_enabled === true,
+          sales_channel_id: row.sales_channel_id ? String(row.sales_channel_id) : null,
+          sales_channel: null,
           created_at: String(row.created_at || ""),
           updated_at: String(row.updated_at || ""),
           territories: territoriesByVisitor.get(row.id) || [],
@@ -1177,10 +1197,32 @@ export default function SalesVisitorsPage() {
       );
 
       setProfiles(profilesResult.data || []);
-      setVisitors(mappedVisitors);
+      setSalesChannels((channelsResult.data || []) as SalesChannel[]);
+
+      const channelMap = new Map(
+        (channelsResult.data || []).map((channel: any) => [
+          channel.id,
+          channel,
+        ])
+      );
+
+      setVisitors(
+        mappedVisitors.map((visitor) => ({
+          ...visitor,
+          sales_channel:
+            visitor.sales_channel_id
+              ? channelMap.get(visitor.sales_channel_id) || null
+              : null,
+        }))
+      );
     } catch (error: any) {
-      console.error("SALES VISITORS LOAD ERROR:", error);
-      alert(`خطا در دریافت اطلاعات ویزیتورها:\n${error?.message || "نامشخص"}`);
+      console.error("SALES VISITORS LOAD ERROR:", {
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code,
+      });
+      alert(`خطا در دریافت اطلاعات ویزیتورها:\n${error?.message || error?.details || "نامشخص"}`);
     } finally {
       setLoading(false);
     }
@@ -1357,6 +1399,7 @@ export default function SalesVisitorsPage() {
       residential_city: visitor.residential_city || "",
       active: visitor.active,
       tracking_enabled: visitor.tracking_enabled,
+      sales_channel_id: visitor.sales_channel_id || "",
       territories:
         visitor.territories.length > 0
           ? visitor.territories.map((item) => ({
@@ -1499,6 +1542,7 @@ export default function SalesVisitorsPage() {
               form.residential_city.trim() || null,
             active: form.active,
             tracking_enabled: form.tracking_enabled,
+            sales_channel_id: form.sales_channel_id || null,
           })
           .eq("id", editingId);
 
@@ -1521,6 +1565,7 @@ export default function SalesVisitorsPage() {
               form.residential_city.trim() || null,
             active: form.active,
             tracking_enabled: form.tracking_enabled,
+            sales_channel_id: form.sales_channel_id || null,
           })
           .select("id")
           .single();
@@ -1633,106 +1678,35 @@ export default function SalesVisitorsPage() {
         subtitle="تعریف، ویرایش، محدوده کاری و وضعیت ردیابی نیروهای فروش"
       />
 
-      <section
+      <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: 14,
-          marginBottom: 20,
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          marginBottom: 8,
         }}
       >
-        <article className="panel" style={{ padding: 18 }}>
-          <div style={{ color: "#64748b", fontSize: 13 }}>کل ویزیتورها</div>
-          <strong style={{ display: "block", fontSize: 28, marginTop: 6 }}>
-            {visitors.length.toLocaleString("fa-IR")}
-          </strong>
-        </article>
-
-        <article className="panel" style={{ padding: 18 }}>
-          <div style={{ color: "#64748b", fontSize: 13 }}>ویزیتور فعال</div>
-          <strong style={{ display: "block", fontSize: 28, marginTop: 6, color: "#047857" }}>
-            {activeCount.toLocaleString("fa-IR")}
-          </strong>
-        </article>
-
-        <article className="panel" style={{ padding: 18 }}>
-          <div style={{ color: "#64748b", fontSize: 13 }}>ردیابی فعال</div>
-          <strong style={{ display: "block", fontSize: 28, marginTop: 6, color: "#2563eb" }}>
-            {trackingCount.toLocaleString("fa-IR")}
-          </strong>
-        </article>
-      </section>
-
-      <section className="panel" style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>فهرست ویزیتورها</h2>
-            <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>
-              هر ویزیتور می‌تواند هم‌زمان در چند استان و منطقه فعالیت داشته باشد.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", minWidth: 260 }}>
-              <Search
-                size={17}
-                style={{
-                  position: "absolute",
-                  right: 11,
-                  top: 11,
-                  color: "#94a3b8",
-                }}
-              />
-              <input
-                className="input"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="جستجوی نام، تلفن یا محدوده..."
-                style={{ paddingRight: 38 }}
-              />
         <button
           type="button"
-          className="btn btn-secondary btn-small"
-          onClick={() => {
-            setSearch("");
-            setTableFilters(EMPTY_VISITOR_TABLE_FILTERS);
+          onClick={openCreate}
+          disabled={saving}
+          title="ایجاد ویزیتور جدید"
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "50%",
+            border: "none",
+            background: "#0f6b43",
+            color: "#fff",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(15,107,67,.22)",
           }}
-          style={{ whiteSpace: "nowrap" }}
         >
-          حذف فیلترها
+          <Plus size={18} />
         </button>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void loadData()}
-              disabled={loading || saving}
-            >
-              <RefreshCw size={16} />
-              بروزرسانی
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={openCreate}
-              disabled={saving}
-            >
-              <Plus size={16} />
-              ویزیتور جدید
-            </button>
-          </div>
-        </div>
-      </section>
+      </div>
 
       <section className="panel" style={{ padding: 0, overflow: "hidden" }}>
         {loading ? (
@@ -1753,154 +1727,31 @@ export default function SalesVisitorsPage() {
           </div>
         ) : (
           <div className="table-wrap">
-            <table style={{ width: "100%" }}>
-                  <thead>
-                    <tr>
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>ویزیتور</span>
-                          <VisitorColumnFilter
-                            title="ویزیتور"
-                            values={visitors.map((item) => item.full_name)}
-                            selected={tableFilters.full_name}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                full_name: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>تلفن</span>
-                          <VisitorColumnFilter
-                            title="تلفن"
-                            values={visitors.map((item) => item.phone || "")}
-                            selected={tableFilters.phone}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                phone: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>استان ویزیت</span>
-                          <VisitorColumnFilter
-                            title="استان ویزیت"
-                            values={Array.from(
-                              new Set(
-                                visitors.flatMap((visitor) =>
-                                  visitor.territories
-                                    .filter((item) => item.active)
-                                    .map((item) => item.province)
-                                )
-                              )
-                            )}
-                            selected={tableFilters.province}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                province: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>منطقه ویزیت</span>
-                          <VisitorColumnFilter
-                            title="منطقه ویزیت"
-                            values={Array.from(
-                              new Set(
-                                visitors.flatMap((visitor) =>
-                                  visitor.territories
-                                    .filter((item) => item.active)
-                                    .map((item) => item.region)
-                                )
-                              )
-                            )}
-                            selected={tableFilters.region}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                region: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>سن</span>
-                          <VisitorColumnFilter
-                            title="سن"
-                            values={visitors.map((item) => {
-                              const age = calculateAge(item.birth_date);
-                              return age === null ? "" : String(age);
-                            })}
-                            selected={tableFilters.age}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                age: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>ردیابی</span>
-                          <VisitorColumnFilter
-                            title="ردیابی"
-                            values={visitors.map((item) =>
-                              item.tracking_enabled ? "فعال" : "خاموش"
-                            )}
-                            selected={tableFilters.tracking}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                tracking: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                          <span>وضعیت</span>
-                          <VisitorColumnFilter
-                            title="وضعیت"
-                            values={visitors.map((item) =>
-                              item.active ? "فعال" : "غیرفعال"
-                            )}
-                            selected={tableFilters.status}
-                            onChange={(next) =>
-                              setTableFilters((current) => ({
-                                ...current,
-                                status: next,
-                              }))
-                            }
-                          />
-                        </div>
-                      </th>
-
-                      <th>عملیات</th>
-                    </tr>
-                  </thead>
+           <table
+  style={{
+    width: "100%",
+    textAlign: "center",
+    direction: "rtl",
+    borderCollapse: "collapse",
+  }}
+>
+                  <thead
+  style={{
+    textAlign: "center",
+  }}
+>
+  <tr>
+    <th>پروفایل</th>
+    <th>نام و نام خانوادگی</th>
+    <th>تلفن</th>
+    <th>نوع فعالیت</th>
+    <th>استان ویزیت</th>
+    <th>منطقه ویزیت</th>
+    <th>ردیابی</th>
+    <th>وضعیت</th>
+    <th style={{ textAlign: "center", verticalAlign: "middle" }}>عملیات</th>
+  </tr>
+</thead>
 
               <tbody>
                 {filteredVisitors.map((visitor) => {
@@ -1908,48 +1759,77 @@ export default function SalesVisitorsPage() {
 
                   return (
                     <tr key={visitor.id}>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 9,
-                          }}
-                        >
-                          {visitor.avatar_url ? (
-                            <img
-                              src={visitor.avatar_url}
-                              alt=""
-                              style={{
-                                width: 38,
-                                height: 38,
-                                objectFit: "cover",
-                                borderRadius: "50%",
-                                border: "1px solid #dbe3ea",
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                width: 38,
-                                height: 38,
-                                borderRadius: "50%",
-                                display: "grid",
-                                placeItems: "center",
-                                background: "#e9f4ef",
-                                color: "#0f6b43",
-                                fontWeight: 900,
-                              }}
-                            >
-                              {(visitor.full_name || "و")[0]}
-                            </div>
-                          )}
+  <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                        {visitor.avatar_url ? (
+                          <img
+                            src={visitor.avatar_url}
+                            alt=""
+                            style={{
+                              width: 38,
+                              height: 38,
+                              objectFit: "cover",
+                              borderRadius: "50%",
+                              border: "1px solid #dbe3ea",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 38,
+                              height: 38,
+                              borderRadius: "50%",
+                              display: "grid",
+                              placeItems: "center",
+                              background: "#e9f4ef",
+                              color: "#0f6b43",
+                              fontWeight: 900,
+                              margin: "auto",
+                            }}
+                          >
+                            {(visitor.full_name || "و")[0]}
+                          </div>
+                        )}
+                      </td>
 
-                          <strong>{visitor.full_name || "بدون نام"}</strong>
-                        </div>
+                      <td>
+                        <strong>{visitor.full_name || "بدون نام"}</strong>
                       </td>
 
                       <td>{visitor.phone || "-"}</td>
+
+                      <td>
+                        {visitor.sales_channel ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "5px 10px",
+                              borderRadius: 999,
+                              background:
+                                visitor.sales_channel.code === "RETAIL"
+                                  ? "#dcfce7"
+                                  : visitor.sales_channel.code === "CHAIN"
+                                  ? "#dbeafe"
+                                  : visitor.sales_channel.code === "VIP"
+                                  ? "#ede9fe"
+                                  : "#ffedd5",
+                              color: "#334155",
+                              fontSize: 12,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {visitor.sales_channel.code === "RETAIL"
+                              ? "🟢"
+                              : visitor.sales_channel.code === "CHAIN"
+                              ? "🔵"
+                              : visitor.sales_channel.code === "VIP"
+                              ? "🟣"
+                              : "🟠"}
+                            {visitor.sales_channel.name}
+                          </span>
+                        ) : "-"}
+                      </td>
 
                       <td>
                         {visitor.territories.filter((item) => item.active).length === 0
@@ -1964,6 +1844,8 @@ export default function SalesVisitorsPage() {
                             ).join("، ")}
                       </td>
 
+                      
+
                       <td>
                         {visitor.territories.filter((item) => item.active).length === 0
                           ? "-"
@@ -1975,24 +1857,7 @@ export default function SalesVisitorsPage() {
                       </td>
 
                       <td>
-                        {age === null
-                          ? "-"
-                          : `${age.toLocaleString("fa-IR")} سال`}
-                      </td>
-
-                      <td>
                         {visitor.tracking_enabled ? "فعال" : "خاموش"}
-                      </td>
-
-                      <td>
-                        <span
-                          style={{
-                            color: visitor.tracking_enabled ? "#047857" : "#64748b",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {visitor.tracking_enabled ? "فعال" : "خاموش"}
-                        </span>
                       </td>
 
                       <td>
@@ -2017,50 +1882,51 @@ export default function SalesVisitorsPage() {
                         <div
                           style={{
                             display: "flex",
-                            gap: 6,
+                            justifyContent: "center",
+                            alignItems: "center",
+                            gap: 4,
                             flexWrap: "wrap",
                           }}
                         >
                           <button
-                            type="button"
-                            className="btn btn-secondary btn-small"
-                            onClick={() => openEdit(visitor)}
-                          >
-                            <Edit3 size={14} />
-                            ویرایش
-                          </button>
+  type="button"
+  className="btn btn-secondary btn-small"
+  onClick={() => openEdit(visitor)}
+  title="ویرایش"
+  aria-label="ویرایش"
+>
+  <Edit3 size={15} />
+</button>
 
                           <button
-                            type="button"
-                            className={
-                              visitor.active
-                                ? "btn btn-danger btn-small"
-                                : "btn btn-primary btn-small"
-                            }
-                            onClick={() => void toggleVisitor(visitor)}
-                          >
-                            {visitor.active ? (
-                              <UserX size={14} />
-                            ) : (
-                              <UserCheck size={14} />
-                            )}
-                            {visitor.active ? "غیرفعال" : "فعال"}
-                          </button>
+  type="button"
+  className={
+    visitor.active
+      ? "btn btn-danger btn-small"
+      : "btn btn-primary btn-small"
+  }
+  onClick={() => void toggleVisitor(visitor)}
+  title={visitor.active ? "غیرفعال کردن" : "فعال کردن"}
+  aria-label={visitor.active ? "غیرفعال کردن" : "فعال کردن"}
+>
+  {visitor.active ? <UserX size={15} /> : <UserCheck size={15} />}
+</button>
 
                           <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={() => deleteVisitor(visitor)}
-                            disabled={saving}
-                            style={{
-                              background: "#fff",
-                              color: "#b91c1c",
-                              border: "1px solid #fecaca",
-                            }}
-                          >
-                            <X size={14} />
-                            حذف
-                          </button>
+  type="button"
+  className="btn btn-small"
+  onClick={() => deleteVisitor(visitor)}
+  disabled={saving}
+  title="حذف"
+  aria-label="حذف"
+  style={{
+    background: "#fff",
+    color: "#b91c1c",
+    border: "1px solid #fecaca",
+  }}
+>
+  <X size={15} />
+</button>
                         </div>
                       </td>
                     </tr>
@@ -2356,6 +2222,28 @@ export default function SalesVisitorsPage() {
                   >
                     اتصال به حساب کاربری اختیاری است و بعداً می‌توانیم برای ورود ویزیتور استفاده کنیم.
                   </small>
+                </div>
+
+                <div className="form-field">
+                  <label>کانال فروش</label>
+                  <select
+                    className="input"
+                    value={form.sales_channel_id}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        sales_channel_id: event.target.value,
+                      }))
+                    }
+                    disabled={saving}
+                  >
+                    <option value="">انتخاب کانال فروش</option>
+                    {salesChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="form-field">
@@ -2655,3 +2543,5 @@ export default function SalesVisitorsPage() {
     </AppShell>
   );
 }
+
+// KPI and performance data should be implemented in a separate dashboard page.

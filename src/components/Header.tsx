@@ -15,6 +15,7 @@ import {
   LogOut,
   Megaphone,
   MapPinned,
+  MapIcon,
   PackageSearch,
   Route,
   ShoppingCart,
@@ -90,6 +91,12 @@ const salesSections = [
     label: "نقشه هوشمند فروش",
     href: "/sales/map",
     icon: MapPinned,
+    disabled: false,
+  },
+  {
+    label: "مدیریت محدوده‌ها",
+    href: "/sales/territories",
+    icon: MapIcon,
     disabled: false,
   },
   {

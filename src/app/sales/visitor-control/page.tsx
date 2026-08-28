@@ -1,8 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
-import { MapContainer, TileLayer } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 import AppShell from "@/components/AppShell";
@@ -27,6 +27,22 @@ type Customer = {
   id: string;
   name: string | null;
 };
+
+/**
+ * Leaflet must only be rendered in the browser.
+ * The previous implementation imported MapContainer/TileLayer directly,
+ * which caused Next.js prerendering to evaluate browser-only code and throw:
+ * ReferenceError: window is not defined
+ */
+const MapContainer = dynamic(
+  () => import("react-leaflet").then((mod) => mod.MapContainer),
+  { ssr: false }
+);
+
+const TileLayer = dynamic(
+  () => import("react-leaflet").then((mod) => mod.TileLayer),
+  { ssr: false }
+);
 
 export default function VisitorControlPage() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
@@ -82,7 +98,6 @@ export default function VisitorControlPage() {
 
   return (
     <AppShell>
-
       <div
         style={{
           display: "grid",
@@ -90,13 +105,9 @@ export default function VisitorControlPage() {
           gap: 20,
         }}
       >
-
         <section className="dashboard-panel">
-
           <div style={{ overflowX: "auto", marginTop: 20 }}>
-
             <table className="data-table">
-
               <thead>
                 <tr>
                   <th>تصویر</th>
@@ -114,63 +125,53 @@ export default function VisitorControlPage() {
 
               <tbody>
                 {visitorList.map((visitor) => (
-
                   <tr key={visitor.id}>
+                    <td>
+                      {visitor.avatar_url ? (
+                        <img
+                          src={visitor.avatar_url}
+                          alt={visitor.full_name ?? ""}
+                          style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: "50%",
+                            objectFit: "cover",
+                            border: "1px solid #dbe3ea",
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: "50%",
+                            display: "grid",
+                            placeItems: "center",
+                            background: "#e9f4ef",
+                            color: "#0f6b43",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {(visitor.full_name ?? "و")[0]}
+                        </div>
+                      )}
+                    </td>
+
+                    <td>{visitor.full_name ?? "-"}</td>
 
                     <td>
-                    {visitor.avatar_url ? (
-                      <img
-                        src={visitor.avatar_url}
-                        alt={visitor.full_name ?? ""}
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: "50%",
-                          objectFit: "cover",
-                          border: "1px solid #dbe3ea",
-                        }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: "50%",
-                          display: "grid",
-                          placeItems: "center",
-                          background: "#e9f4ef",
-                          color: "#0f6b43",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {(visitor.full_name ?? "و")[0]}
-                      </div>
-                    )}
-                  </td>
-
-                  <td>{visitor.full_name ?? "-"}</td>
-
-                    <td>
-                      {
-                        [...new Set(
-                          visitor.territories.map(
-                            (item) => item.province
-                          )
-                        )].join("، ") || "-"
-                      }
+                      {[...new Set(
+                        visitor.territories.map((item) => item.province)
+                      )].join("، ") || "-"}
                     </td>
 
                     <td>
-                      {
-                        visitor.territories
-                          .map((item) => item.region)
-                          .join("، ") || "-"
-                      }
+                      {visitor.territories
+                        .map((item) => item.region)
+                        .join("، ") || "-"}
                     </td>
 
-                    <td>
-                      {visitor.active ? "فعال" : "غیرفعال"}
-                    </td>
+                    <td>{visitor.active ? "فعال" : "غیرفعال"}</td>
 
                     <td>
                       {visitor.tracking_enabled ? "فعال" : "خاموش"}
@@ -181,26 +182,19 @@ export default function VisitorControlPage() {
                     <td>0</td>
 
                     <td>
-                      <button>
-                        <Eye size={16}/>
+                      <button type="button">
+                        <Eye size={16} />
                         مشاهده
                       </button>
                     </td>
-
                   </tr>
-
                 ))}
               </tbody>
-
             </table>
-
           </div>
-
         </section>
 
-
         <section className="dashboard-panel">
-
           <div
             style={{
               height: "600px",
@@ -211,7 +205,6 @@ export default function VisitorControlPage() {
               width: "100%",
             }}
           >
-
             <MapContainer
               center={[35.6892, 51.389]}
               zoom={11}
@@ -221,21 +214,16 @@ export default function VisitorControlPage() {
                 margin: 0,
                 padding: 0,
               }}
+              scrollWheelZoom
             >
-
               <TileLayer
                 url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution="&copy; OpenStreetMap contributors"
               />
-
             </MapContainer>
-
           </div>
-
         </section>
-
       </div>
-
     </AppShell>
   );
 }

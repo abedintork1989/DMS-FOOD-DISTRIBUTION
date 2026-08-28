@@ -7,6 +7,7 @@ import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { supabase } from "@/lib/supabase";
+
 import { approveOrderDocuments, closeOpenDocumentsForOrder } from "@/lib/orderDocuments";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
@@ -1369,69 +1370,15 @@ Policy مربوط به SELECT جدول order_items را بررسی کنید.`
           })()
         : null;
 
-      // =====================================================
-      // ساخت نسخه رسمی فاکتور (فقط اولین تأیید)
-      // Snapshot بعد از تأیید دیگر تغییر نمی‌کند.
-      // =====================================================
-      const { data: existingSnapshot, error: snapshotCheckError } =
-        await supabase
-          .from("order_snapshots")
-          .select("id")
-          .eq("order_id", id)
-          .maybeSingle();
-
-      if (snapshotCheckError) {
-        console.log("SNAPSHOT CHECK ERROR:", snapshotCheckError);
-        alert(`خطا در بررسی نسخه فریز سفارش: ${snapshotCheckError.message}`);
-        setSaving(false);
-        return;
-      }
-
-      if (!existingSnapshot) {
-        const snapshotItems = itemsToSave.map((item: any) => ({
-          product_id: item.product_id,
-          product_name: item.products?.name || "-",
-          quantity: Number(item.quantity || 0),
-          final_order_quantity: Number(item.final_order_quantity || 0),
-          consumer_price: Number(item.consumer_price || 0),
-          discount_percent: Number(item.discount_percent || 0),
-          final_price: Number(item.final_price || 0),
-          total_purchase_price: Number(item.total_purchase_price || 0),
-        }));
-
-        const { error: snapshotInsertError } =
-          await supabase
-            .from("order_snapshots")
-            .insert({
-              order_id: id,
-              customer_id: order.customer_id || null,
-              customer_name: order.customers?.name || null,
-              visitor: order.customers?.visitor || null,
-              items: snapshotItems,
-              invoice_total: grandTotal,
-              send_date: gregorianSendDate,
-              snapshot_type: "official_invoice",
-              approved_by: session.user.id,
-            });
-
-        if (snapshotInsertError) {
-          console.log("SNAPSHOT INSERT ERROR:", snapshotInsertError);
-          alert(`خطا در ساخت نسخه رسمی فاکتور: ${snapshotInsertError.message}`);
-          setSaving(false);
-          return;
-        }
-      }
-
-      const { error: orderUpdateError } =
-        await supabase
-          .from("orders")
-          .update({
-            status: "approved",
-            invoice_total: grandTotal,
-            send_date: gregorianSendDate,
-            warehouse_send_date: null,
-          })
-          .eq("id", id);
+      const { error: orderUpdateError } = await supabase
+        .from("orders")
+        .update({
+          status: "approved",
+          invoice_total: grandTotal,
+          send_date: gregorianSendDate,
+          warehouse_send_date: null,
+        })
+        .eq("id", id);
 
       if (orderUpdateError) {
         console.log(

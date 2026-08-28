@@ -1504,3 +1504,26 @@ tbody tr:last-child td {
 
 
 
+/* =========================================================
+   TERRITORY MAP FULL SCREEN FIX
+========================================================= */
+
+
+.dms-content:has(.territory-map-manager) {
+    max-width:100%;
+    padding:0 !important;
+}
+
+
+.dashboard-panel:has(.territory-map-manager) {
+    padding:0 !important;
+    border-radius:0;
+    box-shadow:none;
+    border:0;
+}
+
+
+.territory-map-manager-wrapper {
+    width:100%;
+    height:100%;
+}

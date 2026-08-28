@@ -1139,12 +1139,20 @@ export default function OrderDetailPage() {
           )
         );
 
+        // اگر «تعداد جزء» دستی ویرایش شده باشد، همان مقدار ملاک جمع
+        // ردیف است؛ در غیر این صورت از کارتن × تعداد داخل کارتن محاسبه می‌شود.
         const deliveryUnits =
           item.delivery_units !== undefined &&
           item.delivery_units !== null &&
           item.delivery_units !== ""
             ? Math.max(0, Number(item.delivery_units))
             : deliveryCartons * cartonSize;
+
+        const consumerPrice = getConfirmedConsumerPrice(item);
+        const discountPercent = getConfirmedDiscount(item);
+        const finalPrice = getConfirmedPrice(item);
+
+        const total = deliveryUnits * finalPrice;
 
         // ابتدا فقط UPDATE را انجام می‌دهیم.
         // نتیجه UPDATE را با SELECT مخلوط نمی‌کنیم تا RLS/RETURNING
@@ -1162,6 +1170,16 @@ export default function OrderDetailPage() {
                 item.delivery_units !== ""
                   ? Number(item.delivery_units)
                   : null,
+              consumer_price:
+                consumerPrice,
+              discount_percent:
+                discountPercent,
+              purchase_price:
+                finalPrice,
+              total_purchase_price:
+                total,
+              final_price:
+                finalPrice,
             })
             .eq("id", item.id);
 
